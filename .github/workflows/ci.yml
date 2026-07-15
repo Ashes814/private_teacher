@@ -72,9 +72,6 @@ jobs:
             src/private_teacher/utils/exceptions.py
 
       # 8. 跑 pytest（不含需要真实 LLM 的测试）
+      # 不设 env 变量，让测试自己用 monkeypatch 管理
       - name: Run tests
-        env:
-          # CI 环境用 ollama provider（不需要真 key）
-          PRIVATE_TEACHER_LLM_PROVIDER: ollama
-          PRIVATE_TEACHER_LOG_LEVEL: ERROR
         run: uv run pytest -m "not requires_llm" --tb=short
