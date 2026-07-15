@@ -38,11 +38,11 @@ jobs:
     steps:
       # 1. 检出代码
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       # 2. 安装 uv（官方 action，自动带缓存）
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v6
         with:
           version: "latest"  # 用最新 uv
           enable-cache: true  # 自动缓存 ~/.cache/uv

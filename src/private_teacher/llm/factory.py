@@ -72,7 +72,7 @@ def build_chat_model(settings: LLMSettings) -> BaseChatModel:
                 )
             # temperature=0.2 让输出相对稳定（教学场景需要可复现）
             # max_tokens 留 None 用 provider 默认
-            return ChatAnthropic(model=settings.claude_model, api_key=api_key, temperature=0.2) # type: ignore
+            return ChatAnthropic(model=settings.claude_model, api_key=api_key, temperature=0.2)  # type: ignore
 
         # ---------- OpenAI 兼容（含中转） ----------
         case "openai_compat":
@@ -84,7 +84,7 @@ def build_chat_model(settings: LLMSettings) -> BaseChatModel:
                     env_var="OPENAI_API_KEY",
                 )
             # base_url 可选：None 时用 OpenAI 官方地址
-            return ChatOpenAI( # type: ignore
+            return ChatOpenAI(  # type: ignore
                 model=settings.openai_model,
                 api_key=api_key,
                 base_url=settings.openai_base_url,
@@ -95,7 +95,7 @@ def build_chat_model(settings: LLMSettings) -> BaseChatModel:
         case "ollama":
             # Ollama 不需要 key，但需要 base_url 和 model 都配置好
             # 不做严格校验，留给用户自己排查
-            return ChatOllama( # type: ignore
+            return ChatOllama(  # type: ignore
                 model=settings.ollama_model,
                 base_url=settings.ollama_base_url,
                 temperature=0.2,
@@ -113,7 +113,7 @@ def build_chat_model(settings: LLMSettings) -> BaseChatModel:
                     env_var="MINIMAX_API_KEY",
                     hint="在 .env 文件中设置 MINIMAX_API_KEY=<你的 key>",
                 )
-            return ChatOpenAI( # type: ignore
+            return ChatOpenAI(  # type: ignore
                 model=settings.minimax_model,  # 默认 minimaxm3
                 api_key=api_key,
                 base_url=settings.minimax_base_url,  # 默认 https://api.minimax.com/v1
