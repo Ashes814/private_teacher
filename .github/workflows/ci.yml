@@ -1,0 +1,90 @@
+# ============================================================
+# Private Teacher - CI Workflow
+# ============================================================
+# 触发时机：每次 push 或 pull_request 到 main 分支
+# 跑什么：lint (ruff) + typecheck (mypy) + test (pytest)
+# 注意：默认不跑需要真实 LLM 的测试（避免 CI 烧钱）
+# ============================================================
+name: CI
+
+# 触发条件
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# 允许在 Actions 页面手动触发（调试用）
+workflow_dispatch:
+
+# 取消上一次未完成的同分支 run（节省 CI 分钟）
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================================
+  # 单一 job：lint + typecheck + test
+  # ============================================================
+  ci:
+    # 运行环境
+    runs-on: ubuntu-latest  # GitHub 提供的免费 Linux runner
+    # Python 版本矩阵（Phase 0 单版本，后面可扩展）
+    strategy:
+      matrix:
+        python-version: ["3.11"]
+      # 如果任何一个版本失败，整个 job 失败
+      fail-fast: true
+
+    steps:
+      # 1. 检出代码
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 2. 安装 uv
+      # 官方 action：https://github.com/astral-sh/setup-uv
+      # 自动带缓存（uv-cache）
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"  # 用最新 uv
+          # 启用缓存（默认缓存 ~/.cache/uv）
+          enable-cache: true
+
+      # 3. 设置 Python 版本
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+
+      # 4. 同步依赖
+      # --all-extras 会装所有 optional groups（dev、test、docs）
+      - name: Install dependencies
+        run: uv sync --all-extras --python ${{ matrix.python-version }}
+
+      # 5. Ruff lint
+      - name: Lint with ruff
+        run: uv run ruff check .
+
+      # 6. Ruff format 检查
+      # --check 不修改文件，只检查格式
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      # 7. Mypy 类型检查（只检查关键模块）
+      # 暂不全量，避免 Phase 0 太严格
+      - name: Type check with mypy
+        run: |
+          uv run mypy \
+            src/private_teacher/config.py \
+            src/private_teacher/llm/factory.py \
+            src/private_teacher/utils/exceptions.py
+
+      # 8. 跑 pytest（不含需要真实 LLM 的测试）
+      # -m "not requires_llm" 跳过 requires_llm marker 的测试
+      # CI 没有真实 API key，跑会失败
+      - name: Run tests
+        env:
+          # CI 环境用 .env.example 作为兜底（虽然大部分是 None）
+          # 让 pydantic 至少能加载到默认值
+          PRIVATE_TEACHER_LLM_PROVIDER: ollama
+          PRIVATE_TEACHER_LOG_LEVEL: ERROR
+        run: uv run pytest -m "not requires_llm" --tb=short

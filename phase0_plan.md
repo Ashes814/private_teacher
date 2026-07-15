@@ -349,6 +349,17 @@ PRIVATE_TEACHER_LLM_OPENAI_MODEL=gpt-4o-mini
 OLLAMA_BASE_URL=http://localhost:11434
 PRIVATE_TEACHER_LLM_OLLAMA_MODEL=qwen2.5:7b
 
+# ---------- MiniMax 配置 ----------
+# MiniMax（https://MiniMax.com/）提供 OpenAI 兼容的 API，所以复用 ChatOpenAI 客户端
+# 申请 key 请到 MiniMax 开发者控制台
+# 形如: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+MINIMAX_API_KEY=
+# MiniMax API 基础地址（OpenAI 兼容协议）
+# 如果你用自建代理或测试环境，改成对应地址
+PRIVATE_TEACHER_LLM_MINIMAX_BASE_URL=https://api.MiniMax.com/v1
+# 默认模型：MiniMaxm3（你也可以改成 MiniMax 提供的其他模型名）
+PRIVATE_TEACHER_LLM_MINIMAX_MODEL=MiniMaxm3
+
 # ---------- 日志配置 ----------
 # 日志级别: DEBUG | INFO | WARNING | ERROR
 PRIVATE_TEACHER_LOG_LEVEL=INFO
@@ -472,9 +483,9 @@ class LLMSettings(BaseSettings):
     # ----- provider 选择 -----
     # Literal[...] 是 Python 3.8+ 的字面量类型，限定只能是括号里的值
     # pydantic 会自动校验：传其他值会抛出 ValidationError
-    provider: Literal["claude", "ollama", "openai_compat"] = Field(
+    provider: Literal["claude", "ollama", "openai_compat", "minimax"] = Field(
         default="claude",  # 默认值（用户没设环境变量时用这个）
-        description="LLM 提供方，可选：claude / ollama / openai_compat",
+        description="LLM 提供方，可选：claude / ollama / openai_compat / minimax",
     )
 
     # ----- Claude 配置 -----
@@ -503,6 +514,18 @@ class LLMSettings(BaseSettings):
     ollama_model: str = Field(
         default="qwen2.5:7b",
         description="Ollama 模型名（需先 ollama pull 下载）",
+    )
+
+    # ----- MiniMax 配置（OpenAI 兼容协议，复用 ChatOpenAI 客户端）-----
+    # MiniMax 的 API 走 OpenAI 兼容协议，所以用 ChatOpenAI 就能连
+    # 模型名默认 minimaxm3，可在 .env 里覆盖
+    minimax_model: str = Field(
+        default="minimaxm3",
+        description="MiniMax 模型名（默认 minimaxm3）",
+    )
+    minimax_base_url: str = Field(
+        default="https://api.minimax.com/v1",
+        description="MiniMax API 基础地址（OpenAI 兼容）",
     )
 
     # ----- pydantic-settings 配置 -----
@@ -637,6 +660,7 @@ class AppSettings:
         当前检查：
           - provider=claude 时必须有 ANTHROPIC_API_KEY
           - provider=openai_compat 时必须有 OPENAI_API_KEY
+          - provider=minimax 时必须有 MINIMAX_API_KEY
           - provider=ollama 时不强制检查（Ollama 本地无 key）
         """
         # 这里先写最简版，Phase 0 只校验最关键的一项
@@ -655,6 +679,13 @@ class AppSettings:
                 raise ValueError(
                     "provider=openai_compat 需要设置环境变量 OPENAI_API_KEY"
                 )
+        elif self.llm.provider == "minimax":
+            # MiniMax 也走 API key 校验（用环境变量 MINIMAX_API_KEY）
+            if not os.getenv("MINIMAX_API_KEY"):
+                raise ValueError(
+                    "provider=minimax 需要设置环境变量 MINIMAX_API_KEY，"
+                    "请在 .env 文件中配置"
+                )
         # ollama 不强制 key
 
     def __repr__(self) -> str:
@@ -670,17 +701,197 @@ class AppSettings:
 > - `validate_for_runtime` 暂时用 `ValueError`，5.3 节替换为 `ConfigurationError`，记得回这里改。
 > - `PathSettings.course_dir` / `ensure_data_dir` 是为 Phase 1 埋伏笔，Phase 0 用不到也保留。
 
-### 4.4 验证
-写完后在 `tests/unit/test_config.py` 里准备写测试（先不写代码，写下要测什么）：
+### 4.4 测试代码（test_config.py）
 
-**要测什么**：
-- 默认值正确（不设环境变量时 provider 是 claude，model 是 sonnet-5）。
-- `.env` 文件能加载（用一个临时 `.env` 测试）。
-- 环境变量优先级高于 `.env`。
-- `validate_for_runtime` 在缺 key 时抛出我们自定义的 `ConfigurationError`。
-- 嵌套字段（`settings.llm.provider`）访问正常。
+跟着模块一起写测试，能在写完 config.py 后立即验证。先写测试再写实现是 TDD 模式，我们这里用的是「**实现 + 测试同步落地**」。
 
-> 🐛 **踩坑**：`BaseSettings` 默认**不**读 `.env` —— 必须显式 `env_file=".env"`。`extra="ignore"` 必须加，否则 `.env` 里的无关变量会报错。
+**tests/unit/test_config.py**
+```python
+"""
+测试 config 模块。
+
+覆盖：
+  - 默认值正确
+  - .env 文件加载
+  - 环境变量优先级
+  - validate_for_runtime 校验
+  - 嵌套字段访问
+"""
+
+from __future__ import annotations
+
+import pytest
+from pathlib import Path
+
+from private_teacher.config import AppSettings, LLMSettings, LogSettings, PathSettings
+from private_teacher.utils.exceptions import ConfigurationError
+
+
+class TestLLMSettings:
+    """测试 LLMSettings 子配置。"""
+
+    def test_default_provider_is_claude(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """默认 provider 应该是 claude。"""
+        # 清空可能影响测试的环境变量
+        monkeypatch.delenv("PRIVATE_TEACHER_LLM_PROVIDER", raising=False)
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        # 切到临时目录，避免读到项目根的 .env
+        monkeypatch.chdir(Path("/tmp"))
+
+        settings = LLMSettings()
+        assert settings.provider == "claude"
+        assert settings.claude_model == "claude-sonnet-5-20251001"
+
+    def test_env_var_overrides_default(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """环境变量应该覆盖默认值。"""
+        monkeypatch.delenv("PRIVATE_TEACHER_LLM_PROVIDER", raising=False)
+        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "ollama")
+        monkeypatch.chdir(Path("/tmp"))
+
+        settings = LLMSettings()
+        assert settings.provider == "ollama"
+
+    def test_dotenv_loading(self, tmp_env: Path) -> None:
+        """.env 文件应被加载。"""
+        # tmp_env fixture 把 cwd 切到 tmp_path
+        (tmp_env / ".env").write_text(
+            "PRIVATE_TEACHER_LLM_PROVIDER=openai_compat\n"
+            "PRIVATE_TEACHER_LLM_OPENAI_MODEL=gpt-4o\n"
+        )
+
+        settings = LLMSettings()
+        assert settings.provider == "openai_compat"
+        assert settings.openai_model == "gpt-4o"
+
+    def test_env_var_beats_dotenv(
+        self, tmp_env: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """环境变量优先级高于 .env 文件。"""
+        (tmp_env / ".env").write_text("PRIVATE_TEACHER_LLM_PROVIDER=ollama\n")
+        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "claude")
+
+        settings = LLMSettings()
+        assert settings.provider == "claude"
+
+    def test_invalid_provider_raises(self, tmp_env: Path) -> None:
+        """provider 取非法值时，pydantic 应抛 ValidationError。"""
+        from pydantic import ValidationError
+
+        (tmp_env / ".env").write_text("PRIVATE_TEACHER_LLM_PROVIDER=invalid\n")
+        with pytest.raises(ValidationError):
+            LLMSettings()
+
+
+class TestLogSettings:
+    """测试 LogSettings 子配置。"""
+
+    def test_default_level_is_info(self) -> None:
+        settings = LogSettings()
+        assert settings.level == "INFO"
+        assert settings.json_logs is False
+
+
+class TestPathSettings:
+    """测试 PathSettings 子配置。"""
+
+    def test_default_data_dir(self) -> None:
+        settings = PathSettings()
+        assert settings.data_dir == Path("./data")
+
+    def test_ensure_data_dir_creates_dir(self, tmp_path: Path) -> None:
+        """ensure_data_dir 应在 data_dir 不存在时创建它。"""
+        from private_teacher.config import PathSettings
+        settings = PathSettings(data_dir=tmp_path / "new_data")
+        assert not (tmp_path / "new_data").exists()
+        settings.ensure_data_dir()
+        assert (tmp_path / "new_data").exists()
+
+
+class TestAppSettings:
+    """测试 AppSettings 聚合配置。"""
+
+    def test_load_returns_all_subsystems(self) -> None:
+        """AppSettings.load() 应返回包含所有子配置的实例。"""
+        settings = AppSettings.load()
+        assert isinstance(settings.llm, LLMSettings)
+        assert isinstance(settings.logging, LogSettings)
+        assert isinstance(settings.paths, PathSettings)
+
+    def test_validate_raises_for_claude_without_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider=claude 但 ANTHROPIC_API_KEY 缺失时应抛 ConfigurationError。"""
+        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "claude")
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+        settings = AppSettings.load()
+        with pytest.raises(ConfigurationError) as exc_info:
+            settings.validate_for_runtime()
+        assert "ANTHROPIC_API_KEY" in str(exc_info.value)
+
+    def test_validate_passes_for_claude_with_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider=claude 且 ANTHROPIC_API_KEY 设置时不应抛错。"""
+        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "claude")
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+
+        settings = AppSettings.load()
+        settings.validate_for_runtime()  # 不应抛错
+
+    def test_validate_raises_for_minimax_without_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider=minimax 但 MINIMAX_API_KEY 缺失时应抛 ConfigurationError。"""
+        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "minimax")
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+
+        settings = AppSettings.load()
+        with pytest.raises(ConfigurationError) as exc_info:
+            settings.validate_for_runtime()
+        assert "MINIMAX_API_KEY" in str(exc_info.value)
+
+    def test_validate_passes_for_minimax_with_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider=minimax 且 MINIMAX_API_KEY 设置时不应抛错。"""
+        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "minimax")
+        monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+
+        settings = AppSettings.load()
+        settings.validate_for_runtime()  # 不应抛错
+
+    def test_repr_hides_sensitive_info(self) -> None:
+        """__repr__ 不应泄露 key。"""
+        settings = AppSettings.load()
+        repr_str = repr(settings)
+        # repr 里不应包含任何 key 字样
+        assert "key" not in repr_str.lower() or "api_key" not in repr_str.lower()
+```
+
+### 4.5 验证
+跑下面这条命令，**应该看到 14 个测试全过**：
+
+```bash
+uv run pytest tests/unit/test_config.py -v
+```
+
+预期输出（节选）：
+```
+tests/unit/test_config.py::TestLLMSettings::test_default_provider_is_claude PASSED
+tests/unit/test_config.py::TestLLMSettings::test_env_var_overrides_default PASSED
+...
+tests/unit/test_config.py::TestAppSettings::test_repr_hides_sensitive_info PASSED
+
+========== 14 passed in 0.5s ==========
+```
+
+> 🐛 **踩坑**：
+> - `BaseSettings` 默认**不**读 `.env` —— 必须显式 `env_file=".env"`。
+> - `extra="ignore"` 必须加，否则 `.env` 里的无关变量会报错。
+> - 跑测试时报 `ModuleNotFoundError: No module named 'private_teacher'`？跑 `uv pip install -e .` 把项目装进 venv。
 
 ---
 
@@ -914,10 +1125,103 @@ from private_teacher.utils.exceptions import ConfigurationError
 #     )
 ```
 
-### 5.4 验证（test_exceptions.py）
-- 抛 `ConfigurationError("xxx")` 也能被 `except PrivateTeacherError` 捕获。
-- 异常 `args` / `str()` 包含 `context` 信息。
-- 异常能在 traceback 里正确显示文件名行号（用 `try/raise/except` 走一遍）。
+### 5.4 测试代码（test_exceptions.py）
+
+**tests/unit/test_exceptions.py**
+```python
+"""
+测试异常体系。
+
+覆盖：
+  - PrivateTeacherError 能被 except PrivateTeacherError 捕获
+  - 子类能被 except PrivateTeacherError 捕获
+  - __str__ 包含 context
+  - LLMError.transient 字段正确
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from private_teacher.utils.exceptions import (
+    PrivateTeacherError,
+    ConfigurationError,
+    LLMError,
+    DocumentLoadError,
+    RAGError,
+    NotebookError,
+    GradingError,
+)
+
+
+class TestPrivateTeacherError:
+    """测试根异常。"""
+
+    def test_can_be_caught_by_base_class(self) -> None:
+        """子类应能被根异常捕获。"""
+        with pytest.raises(PrivateTeacherError):
+            raise ConfigurationError("test")
+
+    def test_str_with_context(self) -> None:
+        """__str__ 应包含 context 信息。"""
+        exc = ConfigurationError("missing", key="ANTHROPIC_API_KEY")
+        result = str(exc)
+        assert "missing" in result
+        assert "ANTHROPIC_API_KEY" in result
+
+    def test_str_without_context(self) -> None:
+        """无 context 时 __str__ 只返回 message。"""
+        exc = ConfigurationError("oops")
+        assert str(exc) == "oops"
+
+    def test_repr_includes_class_name(self) -> None:
+        """__repr__ 应包含类名便于调试。"""
+        exc = ConfigurationError("oops", x=1)
+        r = repr(exc)
+        assert "ConfigurationError" in r
+        assert "oops" in r
+
+
+class TestLLMError:
+    """测试 LLMError 特有字段。"""
+
+    def test_default_transient_is_false(self) -> None:
+        """LLMError 默认 transient=False（永久错误）。"""
+        exc = LLMError("bad json")
+        assert exc.transient is False
+
+    def test_transient_can_be_set_true(self) -> None:
+        """可以显式设置 transient=True。"""
+        exc = LLMError("rate limit", transient=True)
+        assert exc.transient is True
+
+
+class TestHierarchy:
+    """测试异常继承关系。"""
+
+    @pytest.mark.parametrize("exc_cls", [
+        ConfigurationError,
+        LLMError,
+        DocumentLoadError,
+        RAGError,
+        NotebookError,
+        GradingError,
+    ])
+    def test_all_inherit_from_root(self, exc_cls: type) -> None:
+        """所有自定义异常都应继承 PrivateTeacherError。"""
+        assert issubclass(exc_cls, PrivateTeacherError)
+```
+
+### 5.5 验证
+```bash
+uv run pytest tests/unit/test_exceptions.py -v
+```
+
+预期：**13 个测试全过**（含 6 个参数化）。
+
+> 🐛 **踩坑**：
+> - 异常测试不要用 `assert exc_info.value == "xxx"`，而是用 `in str(exc_info.value)`，因为我们重写了 `__str__`。
+> - 测试 `LLMError` 时记得导入 `from private_teacher.utils.exceptions import LLMError`（不是 `from langchain_core.exceptions`）。
 
 ---
 
@@ -1071,10 +1375,73 @@ def get_logger() -> "logger":  # type: ignore[name-defined]  # noqa: F821
 
 > 💡 **小贴士**：在测试时如果想临时屏蔽日志，可以在 `conftest.py` 里调用 `logger.remove()` 或把 level 调成 ERROR。详见 10.3 节。
 
-### 6.4 验证（test_logging.py）
-- `configure_logging(LogSettings(level="DEBUG"))` 后 `logger.debug("...")` 能输出。
-- 调用两次 `configure_logging` 不会重复输出（`remove` 起作用）。
-- 捕获 stderr 看 format 是否符合预期（用 `capsys` fixture）。
+### 6.4 测试代码（test_logging.py）
+
+**tests/unit/test_logging.py**
+```python
+"""
+测试日志模块。
+
+覆盖：
+  - configure_logging 后能输出
+  - 多次调用不重复输出
+  - level 过滤生效
+"""
+
+from __future__ import annotations
+
+import sys
+from io import StringIO
+
+import pytest
+from loguru import logger  # type: ignore[import-untyped]
+
+from private_teacher.config import LogSettings
+from private_teacher.utils.logging import configure_logging
+
+
+class TestConfigureLogging:
+    """测试 configure_logging 函数。"""
+
+    def test_adds_console_sink(self, capsys: pytest.CaptureFixture) -> None:
+        """configure 后 logger.info 应输出到 stderr。"""
+        configure_logging(LogSettings(level="INFO"))
+        logger.info("test message")
+
+        # capsys 默认捕 stdout，loguru 写 stderr，所以用 capsys 不行
+        # 这里直接验证 logger 已配置 sink
+        assert len(logger._core.handlers) >= 1  # noqa: SLF001  # 内部 API
+
+    def test_multiple_calls_dont_duplicate(self) -> None:
+        """多次调用 configure 不应导致重复输出。"""
+        configure_logging(LogSettings(level="INFO"))
+        handlers_count_1 = len(logger._core.handlers)  # noqa: SLF001
+
+        configure_logging(LogSettings(level="INFO"))
+        handlers_count_2 = len(logger._core.handlers)  # noqa: SLF001
+
+        # 第二次 configure 先 remove 再 add，数量应该一致
+        assert handlers_count_1 == handlers_count_2
+
+    def test_level_filtering(self) -> None:
+        """level=ERROR 时 INFO 不应输出。"""
+        configure_logging(LogSettings(level="ERROR"))
+        # 这里只能间接验证：捕获 stderr 看不到 INFO
+        # 更严谨的做法是用 caplog（但 caplog 对 loguru 支持有限）
+        # 我们简化处理：验证 logger 已配置
+        assert len(logger._core.handlers) >= 1  # noqa: SLF001
+```
+
+### 6.5 验证
+```bash
+uv run pytest tests/unit/test_logging.py -v
+```
+
+预期：**3 个测试全过**。
+
+> 🐛 **踩坑**：
+> - loguru 写的是 **stderr**，不是 stdout。pytest 的 `capsys` 默认抓 stdout，要抓 stderr 用 `capsys.readouterr().err`。
+> - 这里直接看 `logger._core.handlers` 是**测试实现细节**，但因为 loguru 没有公开的「已注册 sink 数量」API，只能这么写。Phase 2 可以封装自己的 logger 再用更好的测试方式。
 
 ---
 
@@ -1141,7 +1508,8 @@ from tenacity import (
     retry,                               # 装饰器
     stop_after_attempt,                  # 停止条件：尝试 N 次
     wait_exponential_jitter,             # 等待策略：指数退避 + 抖动
-    retry_if_exception,                  # 自定义重试条件
+    retry_if_exception,                  # 自定义重试条件（接受 lambda）
+    retry_if_exception_type,             # 简单重试条件（接受类型元组）⭐ 别漏！
     before_sleep_log,                    # 重试前回调（打日志）
     RetryError,                          # 当超过 max_attempts 后会抛这个
 )
@@ -1270,10 +1638,167 @@ def read_file(path: Path) -> str:
     ...
 ```
 
-### 7.4 验证（test_retry.py）
-- 用一个「前 2 次失败、第 3 次成功」的假函数，验证重试 3 次后成功。
-- 用一个「永远失败」的假函数，验证重试 max_attempts 次后抛出原异常。
-- 验证重试间 wait 时间大致符合指数（用 `time.monotonic` 测间隔）。
+### 7.4 测试代码（test_retry.py）
+
+**tests/unit/test_retry.py**
+```python
+"""
+测试重试装饰器。
+
+覆盖：
+  - 第 N 次成功时不抛错
+  - 超过 max_attempts 抛原异常
+  - 等待时间大致符合指数
+  - 不在 retry_on 的异常不重试
+"""
+
+from __future__ import annotations
+
+import time
+
+import pytest
+
+from private_teacher.utils.retry import make_retry_decorator
+from private_teacher.utils.exceptions import LLMError
+
+
+class TestRetryDecorator:
+    """测试 make_retry_decorator。"""
+
+    def test_succeeds_after_retries(self) -> None:
+        """前 2 次失败、第 3 次成功的函数，最终应返回成功结果。"""
+        call_count = {"n": 0}
+
+        @make_retry_decorator(
+            max_attempts=3,
+            initial_wait=0.01,  # 测试用 10ms
+            max_wait=0.05,
+            retry_on=(ValueError,),
+        )
+        def flaky() -> str:
+            call_count["n"] += 1
+            if call_count["n"] < 3:
+                raise ValueError("not yet")
+            return "success"
+
+        result = flaky()
+        assert result == "success"
+        assert call_count["n"] == 3  # 调了 3 次
+
+    def test_raises_after_max_attempts(self) -> None:
+        """总是失败的函数应在 max_attempts 次后抛出。"""
+        call_count = {"n": 0}
+
+        @make_retry_decorator(
+            max_attempts=3,
+            initial_wait=0.01,
+            max_wait=0.05,
+            retry_on=(ValueError,),
+        )
+        def always_fail() -> None:
+            call_count["n"] += 1
+            raise ValueError("always")
+
+        with pytest.raises(ValueError, match="always"):
+            always_fail()
+        assert call_count["n"] == 3
+
+    def test_does_not_retry_non_listed_exception(self) -> None:
+        """不在 retry_on 列表里的异常不应重试。"""
+        call_count = {"n": 0}
+
+        @make_retry_decorator(
+            max_attempts=3,
+            initial_wait=0.01,
+            max_wait=0.05,
+            retry_on=(ValueError,),
+        )
+        def raises_key_error() -> None:
+            call_count["n"] += 1
+            raise KeyError("not in retry list")
+
+        with pytest.raises(KeyError):
+            raises_key_error()
+        assert call_count["n"] == 1  # 只调了 1 次
+
+    def test_wait_time_grows_exponentially(self) -> None:
+        """等待时间应大致呈指数增长（带抖动）。"""
+        timestamps: list[float] = []
+
+        @make_retry_decorator(
+            max_attempts=4,
+            initial_wait=0.05,
+            max_wait=1.0,
+            retry_on=(ValueError,),
+        )
+        def always_fail() -> None:
+            timestamps.append(time.monotonic())
+            raise ValueError("fail")
+
+        with pytest.raises(ValueError):
+            always_fail()
+
+        # 计算相邻等待时间
+        waits = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps)-1)]
+        # 第二次等待应比第一次长（指数退避）
+        # 注：带 jitter 所以不一定严格 > ，但应该不会显著更短
+        assert waits[1] > waits[0] * 0.8  # 允许 20% 抖动
+
+
+class TestLLMRetry:
+    """测试 LLM 专用重试。"""
+
+    def test_respects_transient_flag(self) -> None:
+        """transient=False 的 LLMError 不应重试。"""
+        call_count = {"n": 0}
+
+        @make_retry_decorator(
+            max_attempts=3,
+            initial_wait=0.01,
+            max_wait=0.05,
+            retry_on=(LLMError,),
+            use_llm_transient_check=True,
+        )
+        def non_transient() -> None:
+            call_count["n"] += 1
+            raise LLMError("bad json", transient=False)  # 永久错误
+
+        with pytest.raises(LLMError):
+            non_transient()
+        assert call_count["n"] == 1  # 不重试
+
+    def test_retries_transient(self) -> None:
+        """transient=True 的 LLMError 应重试。"""
+        call_count = {"n": 0}
+
+        @make_retry_decorator(
+            max_attempts=3,
+            initial_wait=0.01,
+            max_wait=0.05,
+            retry_on=(LLMError,),
+            use_llm_transient_check=True,
+        )
+        def transient() -> str:
+            call_count["n"] += 1
+            if call_count["n"] < 2:
+                raise LLMError("rate limit", transient=True)
+            return "ok"
+
+        assert transient() == "ok"
+        assert call_count["n"] == 2
+```
+
+### 7.5 验证
+```bash
+uv run pytest tests/unit/test_retry.py -v
+```
+
+预期：**6 个测试全过**（含两个 LLM 专用测试）。
+
+> 🐛 **踩坑**：
+> - 测试时**必须**用 `initial_wait=0.01`（10ms），否则 3 次重试要等 3s+。
+> - `time.monotonic()` 测时间间隔，**不要**用 `time.time()`（会被系统时钟调整影响）。
+> - 带 jitter 的指数退避不是严格递增，断言时留 20% 余量（`> waits[0] * 0.8`）。
 
 ---
 
@@ -1319,6 +1844,7 @@ def read_file(path: Path) -> str:
 - 为什么 temperature 不用 settings 配？→ Phase 0 先硬编码，后续 Phase 2 再加 `LLMSettings.temperature`。
 - 为什么不直接用 LangChain 的 init_chat_model 工厂？→ 我们要保留自己的 settings 校验和异常包装。
 - key 从哪来？→ 你的 `.env` 里写 `ANTHROPIC_API_KEY=...`，pydantic 不会去管这个变量（因为我们没用 `Field` 标它），所以手动 `os.getenv`。
+- **`quick_chat` 拿 model 名时为什么用 `getattr(model, "model", None) or type(model).__name__`？** → `ChatAnthropic/OpenAI/Ollama` 都有 `.model` 属性，但 `FakeListChatModel`（测试用的假模型）**没有**这个属性。直接访问会 `AttributeError`。用 `getattr` + fallback 是兼容所有 `BaseChatModel` 子类的安全写法。
 
 **实现（直接复制）**：
 
@@ -1430,6 +1956,25 @@ def build_chat_model(settings: LLMSettings) -> BaseChatModel:
                 temperature=0.2,
             )
 
+        # ---------- MiniMax（OpenAI 兼容协议）----------
+        case "minimax":
+            # MiniMax 提供的是 OpenAI 兼容 API，所以直接复用 ChatOpenAI
+            # 关键是把 base_url 指向 MiniMax 的网关
+            api_key = os.getenv("MINIMAX_API_KEY")
+            if not api_key:
+                raise ConfigurationError(
+                    "缺少 MINIMAX_API_KEY",
+                    provider="minimax",
+                    env_var="MINIMAX_API_KEY",
+                    hint="在 .env 文件中设置 MINIMAX_API_KEY=<你的 key>",
+                )
+            return ChatOpenAI(
+                model=settings.minimax_model,        # 默认 minimaxm3
+                api_key=api_key,
+                base_url=settings.minimax_base_url,  # 默认 https://api.minimax.com/v1
+                temperature=0.2,
+            )
+
         # ---------- 兜底 ----------
         case _:
             # 理论上不会到这里（pydantic 已经校验过 Literal）
@@ -1437,7 +1982,7 @@ def build_chat_model(settings: LLMSettings) -> BaseChatModel:
             raise ConfigurationError(
                 f"未知的 LLM provider: {settings.provider!r}",
                 provider=str(settings.provider),
-                valid_options=["claude", "ollama", "openai_compat"],
+                valid_options=["claude", "ollama", "openai_compat", "minimax"],
             )
 
 
@@ -1480,11 +2025,15 @@ def quick_chat(
         # 把所有底层异常包装成 LLMError，方便上层统一处理
         # 根据异常类型判断是否 transient
         transient = isinstance(exc, (TimeoutError, ConnectionError, OSError))
+        # ⬇️ 安全获取 model 名（兼容所有 chat model，包括 FakeListChatModel）
+        # ChatAnthropic/OpenAI/Ollama 都有 .model 属性，但 FakeListChatModel 没有
+        # 用 getattr 安全访问，没有就 fallback 到类名
+        model_name = getattr(model, "model", None) or type(model).__name__
         raise LLMError(
             f"LLM 调用失败: {exc}",
             transient=transient,
             provider=settings.provider,
-            model=str(model.model),  # type: ignore[attr-defined]
+            model=str(model_name),
         ) from exc
 
     return str(result.content)
@@ -1510,17 +2059,197 @@ def get_default_chat_model() -> BaseChatModel:
 > - 第一次 `model.invoke` 会发真实 HTTP 请求，会消耗 1 个 token 的钱，**测试时务必用 `FakeListChatModel` 替代**。
 > - `temperature=0.2` 不是 0，留一点创造性。后面 Phase 2 生成单元内容时可以调到 0.5+，Phase 4 批改时调到 0。
 
-### 8.4 验证（test_llm_factory.py）
+### 8.4 测试代码（test_llm_factory.py）
 
-**要测的（不需要真 LLM，用 `monkeypatch` + `respx` 或 mock）**：
-- `build_chat_model` 在 provider=claude 且无 key 时抛 `ConfigurationError`。
-- `build_chat_model` 在 provider=ollama 时返回 `ChatOllama` 实例，model/base_url 正确。
-- `build_chat_model` 在 provider=openai_compat 时返回 `ChatOpenAI` 实例，base_url 正确。
-- `build_chat_model` 在 provider=unknown 时抛 `ConfigurationError`。
-- 三个 provider 都返回 `BaseChatModel` 子类（用 `isinstance`）。
+**tests/unit/test_llm_factory.py**
+```python
+"""
+测试 LLM 工厂。
 
-**可选：真 LLM 烟囱测试**（标记 `@pytest.mark.requires_llm`，默认跳过）：
-- 用 monkeypatch 在环境注入真 key，跑 `quick_chat("Say 'pong' and nothing else")`，断言返回含 `pong`。
+覆盖：
+  - 各 provider 返回正确类型
+  - 缺 key 抛 ConfigurationError
+  - 未知 provider 抛 ConfigurationError
+  - quick_chat 走 base 接口
+"""
+
+from __future__ import annotations
+
+import pytest
+from langchain_core.language_models import BaseChatModel
+
+from private_teacher.config import LLMSettings
+from private_teacher.llm.factory import build_chat_model, quick_chat
+from private_teacher.utils.exceptions import ConfigurationError, LLMError
+
+
+class TestBuildChatModel:
+    """测试 build_chat_model 工厂。"""
+
+    def test_claude_returns_chat_anthropic(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider=claude 应返回 ChatAnthropic 实例。"""
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+        settings = LLMSettings(provider="claude", claude_model="claude-sonnet-5-20251001")
+
+        model = build_chat_model(settings)
+
+        assert isinstance(model, BaseChatModel)
+        # 进一步检查具体类型
+        from langchain_anthropic import ChatAnthropic
+        assert isinstance(model, ChatAnthropic)
+
+    def test_claude_without_key_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider=claude 缺 key 时应抛 ConfigurationError。"""
+        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+        settings = LLMSettings(provider="claude")
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            build_chat_model(settings)
+        assert "ANTHROPIC_API_KEY" in str(exc_info.value)
+
+    def test_openai_compat_returns_chat_openai(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider=openai_compat 应返回 ChatOpenAI 实例。"""
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+        settings = LLMSettings(
+            provider="openai_compat",
+            openai_model="gpt-4o-mini",
+            openai_base_url="https://api.openai.com/v1",
+        )
+
+        model = build_chat_model(settings)
+
+        from langchain_openai import ChatOpenAI
+        assert isinstance(model, ChatOpenAI)
+
+    def test_ollama_returns_chat_ollama(self) -> None:
+        """provider=ollama 应返回 ChatOllama 实例。"""
+        settings = LLMSettings(
+            provider="ollama",
+            ollama_model="qwen2.5:7b",
+            ollama_base_url="http://localhost:11434",
+        )
+
+        model = build_chat_model(settings)
+
+        from langchain_ollama import ChatOllama
+        assert isinstance(model, ChatOllama)
+
+    def test_minimax_returns_chat_openai(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider=minimax 应返回 ChatOpenAI 实例（因为走 OpenAI 兼容协议）。"""
+        monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+        settings = LLMSettings(
+            provider="minimax",
+            minimax_model="minimaxm3",
+            minimax_base_url="https://api.minimax.com/v1",
+        )
+
+        model = build_chat_model(settings)
+
+        from langchain_openai import ChatOpenAI
+        assert isinstance(model, ChatOpenAI)
+        # 进一步验证 base_url 和 model 配置正确
+        assert model.openai_api_base == "https://api.minimax.com/v1"  # type: ignore[attr-defined]
+
+    def test_minimax_without_key_raises(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """provider=minimax 缺 key 时应抛 ConfigurationError。"""
+        monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+        settings = LLMSettings(provider="minimax")
+
+        with pytest.raises(ConfigurationError) as exc_info:
+            build_chat_model(settings)
+        assert "MINIMAX_API_KEY" in str(exc_info.value)
+
+    def test_unknown_provider_raises(self) -> None:
+        """未知 provider 应抛 ConfigurationError。"""
+        # 用 model_construct 绕过 pydantic Literal 校验
+        settings = LLMSettings.model_construct(provider="unknown")  # type: ignore[arg-type]
+
+        with pytest.raises(ConfigurationError):
+            build_chat_model(settings)
+
+
+class TestQuickChat:
+    """测试 quick_chat 便捷函数。"""
+
+    def test_quick_chat_with_fake_model(
+        self, monkeypatch: pytest.MonkeyPatch, fake_chat_model
+    ) -> None:
+        """quick_chat 应能调用假 model 并返回响应。"""
+        # 注入假 model
+        def fake_build(settings: LLMSettings) -> BaseChatModel:
+            return fake_chat_model(responses=["pong"])
+        monkeypatch.setattr(
+            "private_teacher.llm.factory.build_chat_model", fake_build
+        )
+
+        result = quick_chat("ping")
+        assert "pong" in result
+
+    def test_quick_chat_wraps_exception(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """quick_chat 内部异常应被包装为 LLMError。"""
+        from langchain_core.language_models.fake_chat_models import FakeListChatModel
+
+        class BrokenModel(FakeListChatModel):
+            def invoke(self, *args, **kwargs):  # type: ignore[override]
+                raise ConnectionError("network down")
+
+        def fake_build(settings: LLMSettings) -> BaseChatModel:
+            return BrokenModel(responses=[])
+
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+        monkeypatch.setattr(
+            "private_teacher.llm.factory.build_chat_model", fake_build
+        )
+
+        with pytest.raises(LLMError) as exc_info:
+            quick_chat("ping")
+        # ConnectionError 是 transient 错误
+        assert exc_info.value.transient is True
+
+
+# 可选：真实 LLM 烟囱测试（默认跳过）
+@pytest.mark.requires_llm
+class TestRealLLM:
+    """真实 LLM 测试（需 ANTHROPIC_API_KEY 环境变量）。"""
+
+    def test_real_claude_responds(self) -> None:
+        import os
+        if not os.getenv("ANTHROPIC_API_KEY"):
+            pytest.skip("需要 ANTHROPIC_API_KEY")
+
+        settings = LLMSettings(provider="claude")
+        result = quick_chat("Say 'pong' and nothing else.")
+        assert "pong" in result.lower()
+```
+
+### 8.5 验证
+```bash
+# 不含真实 LLM 测试
+uv run pytest tests/unit/test_llm_factory.py -v
+
+# 含真实 LLM 测试（需 key）
+uv run pytest tests/unit/test_llm_factory.py -v -m requires_llm
+```
+
+预期：**8 个测试全过**（不含 requires_llm）；跑 `requires_llm` 会多 1 个真实调用。
+
+> 🐛 **踩坑**：
+> - 测 `minimax` 时一定要 `monkeypatch.setenv("MINIMAX_API_KEY", ...)`，不然会抛 `ConfigurationError`。
+> - `LLMSettings.model_construct(provider="unknown")` 绕过 pydantic Literal 校验，是为了测 factory 的兜底分支。生产代码别这么用。
+> - 测 `openai_api_base` 属性时 LangChain 不同版本名字可能不同（`openai_api_base` vs `base_url`），断言失败就改成 `assert "minimax.com" in str(model.openai_api_base)`。
+> - **`quick_chat` 异常包装时必须用 `getattr(model, "model", None) or type(model).__name__`**——`FakeListChatModel` 没有 `.model` 属性，直接 `model.model` 会炸 `AttributeError`。这是测 `test_quick_chat_wraps_exception` 时最容易踩的坑。
 
 ---
 
@@ -1763,17 +2492,170 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-### 9.4 验证（手动 + 测试）
-- 跑 `uv run python -m private_teacher hello`，看到打印。
-- 跑 `uv run python -m private_teacher hello-llm`，看到 LLM 回复（首次可能要等 5~10s）。
-- 给 `cli.main` 写一个测试：用 `capsys` 捕获 stdout，断言 "Hello" 在输出里。
-- 给 `cmd_hello_llm` 写一个测试：mock `quick_chat`，断言打印了它的返回值。
+### 9.4 测试代码（test_cli.py）
 
-> 🐛 **踩坑**：如果 `from private_teacher.xxx import yyy` 报 `ModuleNotFoundError`，说明 `src/` 没装。先跑 `uv pip install -e .`（uv 会自动做），或者在 `pyproject.toml` 检查 `[tool.uv] package = true` 之类的配置。
+**tests/unit/test_cli.py**
+```python
+"""
+测试 CLI 模块。
+
+覆盖：
+  - hello 命令打印欢迎语
+  - hello-llm 走 mock quick_chat
+  - 错误情况返回非零 exit code
+"""
+
+from __future__ import annotations
+
+import argparse  # ← 用于构造 cmd_hello(args) 的假 Namespace 参数
+import pytest
+
+from private_teacher.cli import main, cmd_hello, cmd_hello_llm, build_parser
+
+
+class TestHelloCommand:
+    """测试 hello 子命令。"""
+
+    def test_hello_prints_greeting(self, capsys: pytest.CaptureFixture) -> None:
+        """hello 应打印包含 'Hello' 的欢迎语。"""
+        result = cmd_hello(argparse.Namespace())  # type: ignore[arg-type]
+        captured = capsys.readouterr()
+
+        assert result == 0
+        assert "Hello" in captured.out
+        assert "Private Teacher" in captured.out
+
+    def test_hello_via_main(self, capsys: pytest.CaptureFixture) -> None:
+        """通过 main(['hello']) 调用应工作。"""
+        result = main(["hello"])
+        captured = capsys.readouterr()
+        assert result == 0
+        assert "Hello" in captured.out
+
+
+class TestHelloLLMCommand:
+    """测试 hello-llm 子命令。"""
+
+    def test_hello_llm_uses_quick_chat(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        capsys: pytest.CaptureFixture,
+    ) -> None:
+        """hello-llm 应调用 quick_chat 并打印结果。"""
+        # mock quick_chat
+        monkeypatch.setattr(
+            "private_teacher.cli.quick_chat",
+            lambda prompt, settings=None: "I am a fake LLM",
+        )
+        # mock 配置加载（避免依赖真实 .env）
+        from private_teacher.config import AppSettings, LogSettings, LLMSettings
+        from private_teacher.utils.exceptions import ConfigurationError
+        fake_settings = AppSettings(
+            llm=LLMSettings(provider="claude"),
+            logging=LogSettings(level="ERROR"),  # 测试时静音
+            paths=type("P", (), {"data_dir": None})(),  # 占位
+        )
+        monkeypatch.setattr(
+            "private_teacher.cli.AppSettings.load",
+            classmethod(lambda cls: fake_settings),
+        )
+        # validate_for_runtime 不抛错
+        monkeypatch.setattr(
+            "private_teacher.config.AppSettings.validate_for_runtime",
+            lambda self: None,
+        )
+
+        result = main(["hello-llm"])
+        captured = capsys.readouterr()
+
+        assert result == 0
+        assert "fake LLM" in captured.out
+
+    def test_hello_llm_returns_error_on_missing_key(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """缺 key 时 hello-llm 应返回非零 exit code。"""
+        from private_teacher.config import AppSettings, LogSettings, LLMSettings
+        from private_teacher.utils.exceptions import ConfigurationError
+
+        fake_settings = AppSettings(
+            llm=LLMSettings(provider="claude"),
+            logging=LogSettings(level="ERROR"),
+            paths=type("P", (), {"data_dir": None})(),
+        )
+        monkeypatch.setattr(
+            "private_teacher.cli.AppSettings.load",
+            classmethod(lambda cls: fake_settings),
+        )
+
+        # 让 validate_for_runtime 抛错
+        def fake_validate(self) -> None:
+            raise ConfigurationError("missing key", env_var="ANTHROPIC_API_KEY")
+        monkeypatch.setattr(
+            "private_teacher.config.AppSettings.validate_for_runtime",
+            fake_validate,
+        )
+
+        result = main(["hello-llm"])
+        assert result == 2  # 缺 key 用 exit code 2
+
+
+class TestParser:
+    """测试 argparse 配置。"""
+
+    def test_parser_requires_command(self) -> None:
+        """不指定子命令应报错。"""
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args([])
+
+    def test_parser_version(self, capsys: pytest.CaptureFixture) -> None:
+        """--version 应打印版本号。"""
+        parser = build_parser()
+        with pytest.raises(SystemExit) as exc_info:
+            parser.parse_args(["--version"])
+        # version action 会调 sys.exit(0)
+        assert exc_info.value.code == 0
+```
+
+> ⚠️ **真实跑通注意**：
+> - `tests/unit/test_cli.py` 里的 `test_hello_llm_returns_error_on_missing_key` 中用 `type("P", ...)` 创建了一个临时类，是为了让 `AppSettings` 实例化不报错（因为 `PathSettings` 需要 `Path` 字段）。生产代码里永远不要这么写。
+> - 如果 `monkeypatch.setattr` 找不到路径（因为是 `from x import y` 引入的），要用 `import private_teacher.cli as cli; monkeypatch.setattr(cli, "AppSettings", ...)`。**Phase 0 教学简化处理，遇到问题再调整**。
+
+### 9.5 验证
+```bash
+# 手动验证 CLI
+uv run python -m private_teacher hello            # 应看到欢迎语
+uv run python -m private_teacher --version        # 应看到版本号
+uv run python -m private_teacher                  # 不带参数应报错
+
+# 跑 CLI 测试
+uv run pytest tests/unit/test_cli.py -v
+```
+
+预期：**6 个测试全过**。
+
+> 🐛 **踩坑**：
+> - 如果 `from private_teacher.xxx import yyy` 报 `ModuleNotFoundError`，说明 `src/` 没装。先跑 `uv pip install -e .`（uv 会自动做），或者在 `pyproject.toml` 检查 `[tool.uv] package = true` 之类的配置。
+> - **`test_cli.py` 必须 `import argparse`**——测试用 `argparse.Namespace()` 构造假参数对象。如果忘了 import，会报 `NameError: name 'argparse' is not defined`。
 
 ---
 
 ## 10. 测试基建（45 分钟）⭐ 重点
+
+> 📍 **本节只放测试基础设施**（`conftest.py` / `fakes/` / `pyproject.toml` 配置）。
+> 各模块的测试代码已经挪到对应模块章节末尾，紧跟实现代码：
+>
+> | 测试文件 | 位置 |
+> | --- | --- |
+> | `tests/unit/test_config.py` | [第 4.4 节](#44-测试代码test_configpy) |
+> | `tests/unit/test_exceptions.py` | [第 5.4 节](#54-测试代码test_exceptionspy) |
+> | `tests/unit/test_logging.py` | [第 6.4 节](#64-测试代码test_loggingpy) |
+> | `tests/unit/test_retry.py` | [第 7.4 节](#74-测试代码test_retrypy) |
+> | `tests/unit/test_llm_factory.py` | [第 8.4 节](#84-测试代码test_llm_factorypy) |
+> | `tests/unit/test_cli.py` | [第 9.4 节](#94-测试代码test_clipy) |
+>
+> 推荐学习方式：**先写完一个模块的实现，立刻跳到对应章节末尾写测试**，跑通再继续下一个。
 
 ### 10.1 目标
 - pytest 能跑起来。
@@ -2037,709 +2919,6 @@ class FakeChatModel(BaseChatModel):
 ```python
 # 标记 unit 为包
 ```
-
-**tests/unit/test_config.py**
-```python
-"""
-测试 config 模块。
-
-覆盖：
-  - 默认值正确
-  - .env 文件加载
-  - 环境变量优先级
-  - validate_for_runtime 校验
-  - 嵌套字段访问
-"""
-
-from __future__ import annotations
-
-import pytest
-from pathlib import Path
-
-from private_teacher.config import AppSettings, LLMSettings, LogSettings, PathSettings
-from private_teacher.utils.exceptions import ConfigurationError
-
-
-class TestLLMSettings:
-    """测试 LLMSettings 子配置。"""
-
-    def test_default_provider_is_claude(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """默认 provider 应该是 claude。"""
-        # 清空可能影响测试的环境变量
-        monkeypatch.delenv("PRIVATE_TEACHER_LLM_PROVIDER", raising=False)
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        # 切到临时目录，避免读到项目根的 .env
-        monkeypatch.chdir(Path("/tmp"))
-
-        settings = LLMSettings()
-        assert settings.provider == "claude"
-        assert settings.claude_model == "claude-sonnet-5-20251001"
-
-    def test_env_var_overrides_default(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """环境变量应该覆盖默认值。"""
-        monkeypatch.delenv("PRIVATE_TEACHER_LLM_PROVIDER", raising=False)
-        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "ollama")
-        monkeypatch.chdir(Path("/tmp"))
-
-        settings = LLMSettings()
-        assert settings.provider == "ollama"
-
-    def test_dotenv_loading(self, tmp_env: Path) -> None:
-        """.env 文件应被加载。"""
-        # tmp_env fixture 把 cwd 切到 tmp_path
-        (tmp_env / ".env").write_text(
-            "PRIVATE_TEACHER_LLM_PROVIDER=openai_compat\n"
-            "PRIVATE_TEACHER_LLM_OPENAI_MODEL=gpt-4o\n"
-        )
-
-        settings = LLMSettings()
-        assert settings.provider == "openai_compat"
-        assert settings.openai_model == "gpt-4o"
-
-    def test_env_var_beats_dotenv(
-        self, tmp_env: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """环境变量优先级高于 .env 文件。"""
-        (tmp_env / ".env").write_text("PRIVATE_TEACHER_LLM_PROVIDER=ollama\n")
-        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "claude")
-
-        settings = LLMSettings()
-        assert settings.provider == "claude"
-
-    def test_invalid_provider_raises(self, tmp_env: Path) -> None:
-        """provider 取非法值时，pydantic 应抛 ValidationError。"""
-        from pydantic import ValidationError
-
-        (tmp_env / ".env").write_text("PRIVATE_TEACHER_LLM_PROVIDER=invalid\n")
-        with pytest.raises(ValidationError):
-            LLMSettings()
-
-
-class TestLogSettings:
-    """测试 LogSettings 子配置。"""
-
-    def test_default_level_is_info(self) -> None:
-        settings = LogSettings()
-        assert settings.level == "INFO"
-        assert settings.json_logs is False
-
-
-class TestPathSettings:
-    """测试 PathSettings 子配置。"""
-
-    def test_default_data_dir(self) -> None:
-        settings = PathSettings()
-        assert settings.data_dir == Path("./data")
-
-    def test_ensure_data_dir_creates_dir(self, tmp_path: Path) -> None:
-        """ensure_data_dir 应在 data_dir 不存在时创建它。"""
-        from private_teacher.config import PathSettings
-        settings = PathSettings(data_dir=tmp_path / "new_data")
-        assert not (tmp_path / "new_data").exists()
-        settings.ensure_data_dir()
-        assert (tmp_path / "new_data").exists()
-
-
-class TestAppSettings:
-    """测试 AppSettings 聚合配置。"""
-
-    def test_load_returns_all_subsystems(self) -> None:
-        """AppSettings.load() 应返回包含所有子配置的实例。"""
-        settings = AppSettings.load()
-        assert isinstance(settings.llm, LLMSettings)
-        assert isinstance(settings.logging, LogSettings)
-        assert isinstance(settings.paths, PathSettings)
-
-    def test_validate_raises_for_claude_without_key(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """provider=claude 但 ANTHROPIC_API_KEY 缺失时应抛 ConfigurationError。"""
-        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "claude")
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-
-        settings = AppSettings.load()
-        with pytest.raises(ConfigurationError) as exc_info:
-            settings.validate_for_runtime()
-        assert "ANTHROPIC_API_KEY" in str(exc_info.value)
-
-    def test_validate_passes_for_claude_with_key(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """provider=claude 且 ANTHROPIC_API_KEY 设置时不应抛错。"""
-        monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "claude")
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-
-        settings = AppSettings.load()
-        settings.validate_for_runtime()  # 不应抛错
-
-    def test_repr_hides_sensitive_info(self) -> None:
-        """__repr__ 不应泄露 key。"""
-        settings = AppSettings.load()
-        repr_str = repr(settings)
-        # repr 里不应包含任何 key 字样
-        assert "key" not in repr_str.lower() or "api_key" not in repr_str.lower()
-```
-
-**tests/unit/test_exceptions.py**
-```python
-"""
-测试异常体系。
-
-覆盖：
-  - PrivateTeacherError 能被 except PrivateTeacherError 捕获
-  - 子类能被 except PrivateTeacherError 捕获
-  - __str__ 包含 context
-  - LLMError.transient 字段正确
-"""
-
-from __future__ import annotations
-
-import pytest
-
-from private_teacher.utils.exceptions import (
-    PrivateTeacherError,
-    ConfigurationError,
-    LLMError,
-    DocumentLoadError,
-    RAGError,
-    NotebookError,
-    GradingError,
-)
-
-
-class TestPrivateTeacherError:
-    """测试根异常。"""
-
-    def test_can_be_caught_by_base_class(self) -> None:
-        """子类应能被根异常捕获。"""
-        with pytest.raises(PrivateTeacherError):
-            raise ConfigurationError("test")
-
-    def test_str_with_context(self) -> None:
-        """__str__ 应包含 context 信息。"""
-        exc = ConfigurationError("missing", key="ANTHROPIC_API_KEY")
-        result = str(exc)
-        assert "missing" in result
-        assert "ANTHROPIC_API_KEY" in result
-
-    def test_str_without_context(self) -> None:
-        """无 context 时 __str__ 只返回 message。"""
-        exc = ConfigurationError("oops")
-        assert str(exc) == "oops"
-
-    def test_repr_includes_class_name(self) -> None:
-        """__repr__ 应包含类名便于调试。"""
-        exc = ConfigurationError("oops", x=1)
-        r = repr(exc)
-        assert "ConfigurationError" in r
-        assert "oops" in r
-
-
-class TestLLMError:
-    """测试 LLMError 特有字段。"""
-
-    def test_default_transient_is_false(self) -> None:
-        """LLMError 默认 transient=False（永久错误）。"""
-        exc = LLMError("bad json")
-        assert exc.transient is False
-
-    def test_transient_can_be_set_true(self) -> None:
-        """可以显式设置 transient=True。"""
-        exc = LLMError("rate limit", transient=True)
-        assert exc.transient is True
-
-
-class TestHierarchy:
-    """测试异常继承关系。"""
-
-    @pytest.mark.parametrize("exc_cls", [
-        ConfigurationError,
-        LLMError,
-        DocumentLoadError,
-        RAGError,
-        NotebookError,
-        GradingError,
-    ])
-    def test_all_inherit_from_root(self, exc_cls: type) -> None:
-        """所有自定义异常都应继承 PrivateTeacherError。"""
-        assert issubclass(exc_cls, PrivateTeacherError)
-```
-
-**tests/unit/test_logging.py**
-```python
-"""
-测试日志模块。
-
-覆盖：
-  - configure_logging 后能输出
-  - 多次调用不重复输出
-  - level 过滤生效
-"""
-
-from __future__ import annotations
-
-import sys
-from io import StringIO
-
-import pytest
-from loguru import logger  # type: ignore[import-untyped]
-
-from private_teacher.config import LogSettings
-from private_teacher.utils.logging import configure_logging
-
-
-class TestConfigureLogging:
-    """测试 configure_logging 函数。"""
-
-    def test_adds_console_sink(self, capsys: pytest.CaptureFixture) -> None:
-        """configure 后 logger.info 应输出到 stderr。"""
-        configure_logging(LogSettings(level="INFO"))
-        logger.info("test message")
-
-        # capsys 默认捕 stdout，loguru 写 stderr，所以用 capsys 不行
-        # 这里直接验证 logger 已配置 sink
-        assert len(logger._core.handlers) >= 1  # noqa: SLF001  # 内部 API
-
-    def test_multiple_calls_dont_duplicate(self) -> None:
-        """多次调用 configure 不应导致重复输出。"""
-        configure_logging(LogSettings(level="INFO"))
-        handlers_count_1 = len(logger._core.handlers)  # noqa: SLF001
-
-        configure_logging(LogSettings(level="INFO"))
-        handlers_count_2 = len(logger._core.handlers)  # noqa: SLF001
-
-        # 第二次 configure 先 remove 再 add，数量应该一致
-        assert handlers_count_1 == handlers_count_2
-
-    def test_level_filtering(self) -> None:
-        """level=ERROR 时 INFO 不应输出。"""
-        configure_logging(LogSettings(level="ERROR"))
-        # 这里只能间接验证：捕获 stderr 看不到 INFO
-        # 更严谨的做法是用 caplog（但 caplog 对 loguru 支持有限）
-        # 我们简化处理：验证 logger 已配置
-        assert len(logger._core.handlers) >= 1  # noqa: SLF001
-```
-
-**tests/unit/test_retry.py**
-```python
-"""
-测试重试装饰器。
-
-覆盖：
-  - 第 N 次成功时不抛错
-  - 超过 max_attempts 抛原异常
-  - 等待时间大致符合指数
-  - 不在 retry_on 的异常不重试
-"""
-
-from __future__ import annotations
-
-import time
-
-import pytest
-
-from private_teacher.utils.retry import make_retry_decorator
-from private_teacher.utils.exceptions import LLMError
-
-
-class TestRetryDecorator:
-    """测试 make_retry_decorator。"""
-
-    def test_succeeds_after_retries(self) -> None:
-        """前 2 次失败、第 3 次成功的函数，最终应返回成功结果。"""
-        call_count = {"n": 0}
-
-        @make_retry_decorator(
-            max_attempts=3,
-            initial_wait=0.01,  # 测试用 10ms
-            max_wait=0.05,
-            retry_on=(ValueError,),
-        )
-        def flaky() -> str:
-            call_count["n"] += 1
-            if call_count["n"] < 3:
-                raise ValueError("not yet")
-            return "success"
-
-        result = flaky()
-        assert result == "success"
-        assert call_count["n"] == 3  # 调了 3 次
-
-    def test_raises_after_max_attempts(self) -> None:
-        """总是失败的函数应在 max_attempts 次后抛出。"""
-        call_count = {"n": 0}
-
-        @make_retry_decorator(
-            max_attempts=3,
-            initial_wait=0.01,
-            max_wait=0.05,
-            retry_on=(ValueError,),
-        )
-        def always_fail() -> None:
-            call_count["n"] += 1
-            raise ValueError("always")
-
-        with pytest.raises(ValueError, match="always"):
-            always_fail()
-        assert call_count["n"] == 3
-
-    def test_does_not_retry_non_listed_exception(self) -> None:
-        """不在 retry_on 列表里的异常不应重试。"""
-        call_count = {"n": 0}
-
-        @make_retry_decorator(
-            max_attempts=3,
-            initial_wait=0.01,
-            max_wait=0.05,
-            retry_on=(ValueError,),
-        )
-        def raises_key_error() -> None:
-            call_count["n"] += 1
-            raise KeyError("not in retry list")
-
-        with pytest.raises(KeyError):
-            raises_key_error()
-        assert call_count["n"] == 1  # 只调了 1 次
-
-    def test_wait_time_grows_exponentially(self) -> None:
-        """等待时间应大致呈指数增长（带抖动）。"""
-        timestamps: list[float] = []
-
-        @make_retry_decorator(
-            max_attempts=4,
-            initial_wait=0.05,
-            max_wait=1.0,
-            retry_on=(ValueError,),
-        )
-        def always_fail() -> None:
-            timestamps.append(time.monotonic())
-            raise ValueError("fail")
-
-        with pytest.raises(ValueError):
-            always_fail()
-
-        # 计算相邻等待时间
-        waits = [timestamps[i+1] - timestamps[i] for i in range(len(timestamps)-1)]
-        # 第二次等待应比第一次长（指数退避）
-        # 注：带 jitter 所以不一定严格 > ，但应该不会显著更短
-        assert waits[1] > waits[0] * 0.8  # 允许 20% 抖动
-
-
-class TestLLMRetry:
-    """测试 LLM 专用重试。"""
-
-    def test_respects_transient_flag(self) -> None:
-        """transient=False 的 LLMError 不应重试。"""
-        call_count = {"n": 0}
-
-        @make_retry_decorator(
-            max_attempts=3,
-            initial_wait=0.01,
-            max_wait=0.05,
-            retry_on=(LLMError,),
-            use_llm_transient_check=True,
-        )
-        def non_transient() -> None:
-            call_count["n"] += 1
-            raise LLMError("bad json", transient=False)  # 永久错误
-
-        with pytest.raises(LLMError):
-            non_transient()
-        assert call_count["n"] == 1  # 不重试
-
-    def test_retries_transient(self) -> None:
-        """transient=True 的 LLMError 应重试。"""
-        call_count = {"n": 0}
-
-        @make_retry_decorator(
-            max_attempts=3,
-            initial_wait=0.01,
-            max_wait=0.05,
-            retry_on=(LLMError,),
-            use_llm_transient_check=True,
-        )
-        def transient() -> str:
-            call_count["n"] += 1
-            if call_count["n"] < 2:
-                raise LLMError("rate limit", transient=True)
-            return "ok"
-
-        assert transient() == "ok"
-        assert call_count["n"] == 2
-```
-
-**tests/unit/test_llm_factory.py**
-```python
-"""
-测试 LLM 工厂。
-
-覆盖：
-  - 各 provider 返回正确类型
-  - 缺 key 抛 ConfigurationError
-  - 未知 provider 抛 ConfigurationError
-  - quick_chat 走 base 接口
-"""
-
-from __future__ import annotations
-
-import pytest
-from langchain_core.language_models import BaseChatModel
-
-from private_teacher.config import LLMSettings
-from private_teacher.llm.factory import build_chat_model, quick_chat
-from private_teacher.utils.exceptions import ConfigurationError, LLMError
-
-
-class TestBuildChatModel:
-    """测试 build_chat_model 工厂。"""
-
-    def test_claude_returns_chat_anthropic(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """provider=claude 应返回 ChatAnthropic 实例。"""
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test")
-        settings = LLMSettings(provider="claude", claude_model="claude-sonnet-5-20251001")
-
-        model = build_chat_model(settings)
-
-        assert isinstance(model, BaseChatModel)
-        # 进一步检查具体类型
-        from langchain_anthropic import ChatAnthropic
-        assert isinstance(model, ChatAnthropic)
-
-    def test_claude_without_key_raises(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """provider=claude 缺 key 时应抛 ConfigurationError。"""
-        monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-        settings = LLMSettings(provider="claude")
-
-        with pytest.raises(ConfigurationError) as exc_info:
-            build_chat_model(settings)
-        assert "ANTHROPIC_API_KEY" in str(exc_info.value)
-
-    def test_openai_compat_returns_chat_openai(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """provider=openai_compat 应返回 ChatOpenAI 实例。"""
-        monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
-        settings = LLMSettings(
-            provider="openai_compat",
-            openai_model="gpt-4o-mini",
-            openai_base_url="https://api.openai.com/v1",
-        )
-
-        model = build_chat_model(settings)
-
-        from langchain_openai import ChatOpenAI
-        assert isinstance(model, ChatOpenAI)
-
-    def test_ollama_returns_chat_ollama(self) -> None:
-        """provider=ollama 应返回 ChatOllama 实例。"""
-        settings = LLMSettings(
-            provider="ollama",
-            ollama_model="qwen2.5:7b",
-            ollama_base_url="http://localhost:11434",
-        )
-
-        model = build_chat_model(settings)
-
-        from langchain_ollama import ChatOllama
-        assert isinstance(model, ChatOllama)
-
-    def test_unknown_provider_raises(self) -> None:
-        """未知 provider 应抛 ConfigurationError。"""
-        # 用 model_construct 绕过 pydantic Literal 校验
-        settings = LLMSettings.model_construct(provider="unknown")  # type: ignore[arg-type]
-
-        with pytest.raises(ConfigurationError):
-            build_chat_model(settings)
-
-
-class TestQuickChat:
-    """测试 quick_chat 便捷函数。"""
-
-    def test_quick_chat_with_fake_model(
-        self, monkeypatch: pytest.MonkeyPatch, fake_chat_model
-    ) -> None:
-        """quick_chat 应能调用假 model 并返回响应。"""
-        # 注入假 model
-        def fake_build(settings: LLMSettings) -> BaseChatModel:
-            return fake_chat_model(responses=["pong"])
-        monkeypatch.setattr(
-            "private_teacher.llm.factory.build_chat_model", fake_build
-        )
-
-        result = quick_chat("ping")
-        assert "pong" in result
-
-    def test_quick_chat_wraps_exception(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """quick_chat 内部异常应被包装为 LLMError。"""
-        from langchain_core.language_models.fake_chat_models import FakeListChatModel
-
-        class BrokenModel(FakeListChatModel):
-            def invoke(self, *args, **kwargs):  # type: ignore[override]
-                raise ConnectionError("network down")
-
-        def fake_build(settings: LLMSettings) -> BaseChatModel:
-            return BrokenModel(responses=[])
-
-        monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
-        monkeypatch.setattr(
-            "private_teacher.llm.factory.build_chat_model", fake_build
-        )
-
-        with pytest.raises(LLMError) as exc_info:
-            quick_chat("ping")
-        # ConnectionError 是 transient 错误
-        assert exc_info.value.transient is True
-
-
-# 可选：真实 LLM 烟囱测试（默认跳过）
-@pytest.mark.requires_llm
-class TestRealLLM:
-    """真实 LLM 测试（需 ANTHROPIC_API_KEY 环境变量）。"""
-
-    def test_real_claude_responds(self) -> None:
-        import os
-        if not os.getenv("ANTHROPIC_API_KEY"):
-            pytest.skip("需要 ANTHROPIC_API_KEY")
-
-        settings = LLMSettings(provider="claude")
-        result = quick_chat("Say 'pong' and nothing else.")
-        assert "pong" in result.lower()
-```
-
-**tests/unit/test_cli.py**
-```python
-"""
-测试 CLI 模块。
-
-覆盖：
-  - hello 命令打印欢迎语
-  - hello-llm 走 mock quick_chat
-  - 错误情况返回非零 exit code
-"""
-
-from __future__ import annotations
-
-import pytest
-
-from private_teacher.cli import main, cmd_hello, cmd_hello_llm, build_parser
-
-
-class TestHelloCommand:
-    """测试 hello 子命令。"""
-
-    def test_hello_prints_greeting(self, capsys: pytest.CaptureFixture) -> None:
-        """hello 应打印包含 'Hello' 的欢迎语。"""
-        result = cmd_hello(argparse.Namespace())  # type: ignore[arg-type]
-        captured = capsys.readouterr()
-
-        assert result == 0
-        assert "Hello" in captured.out
-        assert "Private Teacher" in captured.out
-
-    def test_hello_via_main(self, capsys: pytest.CaptureFixture) -> None:
-        """通过 main(['hello']) 调用应工作。"""
-        result = main(["hello"])
-        captured = capsys.readouterr()
-        assert result == 0
-        assert "Hello" in captured.out
-
-
-class TestHelloLLMCommand:
-    """测试 hello-llm 子命令。"""
-
-    def test_hello_llm_uses_quick_chat(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        capsys: pytest.CaptureFixture,
-    ) -> None:
-        """hello-llm 应调用 quick_chat 并打印结果。"""
-        # mock quick_chat
-        monkeypatch.setattr(
-            "private_teacher.cli.quick_chat",
-            lambda prompt, settings=None: "I am a fake LLM",
-        )
-        # mock 配置加载（避免依赖真实 .env）
-        from private_teacher.config import AppSettings, LogSettings, LLMSettings
-        from private_teacher.utils.exceptions import ConfigurationError
-        fake_settings = AppSettings(
-            llm=LLMSettings(provider="claude"),
-            logging=LogSettings(level="ERROR"),  # 测试时静音
-            paths=type("P", (), {"data_dir": None})(),  # 占位
-        )
-        monkeypatch.setattr(
-            "private_teacher.cli.AppSettings.load",
-            classmethod(lambda cls: fake_settings),
-        )
-        # validate_for_runtime 不抛错
-        monkeypatch.setattr(
-            "private_teacher.config.AppSettings.validate_for_runtime",
-            lambda self: None,
-        )
-
-        result = main(["hello-llm"])
-        captured = capsys.readouterr()
-
-        assert result == 0
-        assert "fake LLM" in captured.out
-
-    def test_hello_llm_returns_error_on_missing_key(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """缺 key 时 hello-llm 应返回非零 exit code。"""
-        from private_teacher.config import AppSettings, LogSettings, LLMSettings
-        from private_teacher.utils.exceptions import ConfigurationError
-
-        fake_settings = AppSettings(
-            llm=LLMSettings(provider="claude"),
-            logging=LogSettings(level="ERROR"),
-            paths=type("P", (), {"data_dir": None})(),
-        )
-        monkeypatch.setattr(
-            "private_teacher.cli.AppSettings.load",
-            classmethod(lambda cls: fake_settings),
-        )
-
-        # 让 validate_for_runtime 抛错
-        def fake_validate(self) -> None:
-            raise ConfigurationError("missing key", env_var="ANTHROPIC_API_KEY")
-        monkeypatch.setattr(
-            "private_teacher.config.AppSettings.validate_for_runtime",
-            fake_validate,
-        )
-
-        result = main(["hello-llm"])
-        assert result == 2  # 缺 key 用 exit code 2
-
-
-class TestParser:
-    """测试 argparse 配置。"""
-
-    def test_parser_requires_command(self) -> None:
-        """不指定子命令应报错。"""
-        parser = build_parser()
-        with pytest.raises(SystemExit):
-            parser.parse_args([])
-
-    def test_parser_version(self, capsys: pytest.CaptureFixture) -> None:
-        """--version 应打印版本号。"""
-        parser = build_parser()
-        with pytest.raises(SystemExit) as exc_info:
-            parser.parse_args(["--version"])
-        # version action 会调 sys.exit(0)
-        assert exc_info.value.code == 0
-```
-
-> ⚠️ **真实跑通注意**：
-> - `tests/unit/test_cli.py` 里的 `test_hello_llm_returns_error_on_missing_key` 中用 `type("P", ...)` 创建了一个临时类，是为了让 `AppSettings` 实例化不报错（因为 `PathSettings` 需要 `Path` 字段）。生产代码里永远不要这么写。
-> - 如果 `monkeypatch.setattr` 找不到路径（因为是 `from x import y` 引入的），要用 `import private_teacher.cli as cli; monkeypatch.setattr(cli, "AppSettings", ...)`。**Phase 0 教学简化处理，遇到问题再调整**。
 
 **pyproject.toml 新增 section**：
 
@@ -3520,3 +3699,232 @@ MIT
 > 接下来：**先跑通第 0~2 步**（环境 + uv + 依赖），把空骨架立起来。然后**按顺序**做 3 → 4 → 5 → 6 → 7 → 8 → 9，每步结束都用「验证」段落的命令自检。**第 8 步 LLM 工厂是最大坎**，遇到报错就贴出来我们一起看。
 >
 > 跑完 Phase 0 之后告诉我，我陪你进 Phase 1。
+
+---
+
+## 20. 补充：添加 MiniMax Provider（v0.1.0 增量变更）
+
+> 本节是对前面章节的**增量修改**，把所有出现 `claude / ollama / openai_compat` 的地方都加上 `minimax` 选项。
+> **不需要重做整个 Phase 0**，只需要在对应文件里加几行代码。
+
+### 20.1 变更总览
+
+| 改动点 | 文件 | 内容 |
+| --- | --- | --- |
+| 1 | `.env.example` | 增加 `MINIMAX_API_KEY` / `PRIVATE_TEACHER_LLM_MINIMAX_*` 三个变量 |
+| 2 | `src/private_teacher/config.py` | `LLMSettings.provider` Literal 增加 `"minimax"`；新增 `minimax_model` / `minimax_base_url` 字段；`validate_for_runtime` 增加 minimax 校验分支 |
+| 3 | `src/private_teacher/llm/factory.py` | `match/case` 增加 `case "minimax":`，复用 `ChatOpenAI` + 自定义 `base_url` |
+| 4 | `tests/unit/test_config.py` | 增加 `test_validate_raises_for_minimax_without_key` 和 `test_validate_passes_for_minimax_with_key` |
+| 5 | `tests/unit/test_llm_factory.py` | 增加 `test_minimax_returns_chat_openai` 和 `test_minimax_without_key_raises` |
+| 6 | `pyproject.toml` | **不需要改动**（依赖没变） |
+| 7 | `README.md` | 路线图或特性里可加一句「支持 MiniMax provider」 |
+
+### 20.2 完整变更 diff（直接复制）
+
+#### 1) `.env.example` —— 在 Ollama 配置段后追加
+
+```bash
+# ---------- MiniMax 配置 ----------
+# MiniMax（OpenAI 兼容 API）申请 key 请到 MiniMax 开发者控制台
+MINIMAX_API_KEY=
+PRIVATE_TEACHER_LLM_MINIMAX_BASE_URL=https://api.minimax.com/v1
+PRIVATE_TEACHER_LLM_MINIMAX_MODEL=minimaxm3
+```
+
+#### 2) `src/private_teacher/config.py` —— 三处修改
+
+**改 ①**：`provider` 字段增加 `"minimax"`：
+
+```python
+provider: Literal["claude", "ollama", "openai_compat", "minimax"] = Field(
+    default="claude",
+    description="LLM 提供方，可选：claude / ollama / openai_compat / minimax",
+)
+```
+
+**改 ②**：在 `ollama_model` 之后增加 MiniMax 字段：
+
+```python
+# ----- MiniMax 配置（OpenAI 兼容协议）-----
+minimax_model: str = Field(
+    default="minimaxm3",
+    description="MiniMax 模型名（默认 minimaxm3）",
+)
+minimax_base_url: str = Field(
+    default="https://api.minimax.com/v1",
+    description="MiniMax API 基础地址（OpenAI 兼容）",
+)
+```
+
+**改 ③**：`validate_for_runtime` 增加 elif 分支：
+
+```python
+elif self.llm.provider == "minimax":
+    if not os.getenv("MINIMAX_API_KEY"):
+        raise ValueError(
+            "provider=minimax 需要设置环境变量 MINIMAX_API_KEY，"
+            "请在 .env 文件中配置"
+        )
+```
+
+#### 3) `src/private_teacher/llm/factory.py` —— 在 `case "ollama"` 之后增加新分支
+
+```python
+# ---------- MiniMax（OpenAI 兼容协议）----------
+case "minimax":
+    # MiniMax 提供的是 OpenAI 兼容 API，所以直接复用 ChatOpenAI
+    # 关键是把 base_url 指向 MiniMax 的网关
+    api_key = os.getenv("MINIMAX_API_KEY")
+    if not api_key:
+        raise ConfigurationError(
+            "缺少 MINIMAX_API_KEY",
+            provider="minimax",
+            env_var="MINIMAX_API_KEY",
+            hint="在 .env 文件中设置 MINIMAX_API_KEY=<你的 key>",
+        )
+    return ChatOpenAI(
+        model=settings.minimax_model,        # 默认 minimaxm3
+        api_key=api_key,
+        base_url=settings.minimax_base_url,  # 默认 https://api.minimax.com/v1
+        temperature=0.2,
+    )
+```
+
+**别忘了**把 `case _` 兜底分支的 `valid_options` 列表也加上 `"minimax"`：
+
+```python
+raise ConfigurationError(
+    f"未知的 LLM provider: {settings.provider!r}",
+    provider=str(settings.provider),
+    valid_options=["claude", "ollama", "openai_compat", "minimax"],  # ← 加 minimax
+)
+```
+
+#### 4) `tests/unit/test_config.py` —— 在 `TestAppSettings` 类里追加
+
+```python
+def test_validate_raises_for_minimax_without_key(
+    self, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """provider=minimax 但 MINIMAX_API_KEY 缺失时应抛 ConfigurationError。"""
+    monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "minimax")
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+
+    settings = AppSettings.load()
+    with pytest.raises(ConfigurationError) as exc_info:
+        settings.validate_for_runtime()
+    assert "MINIMAX_API_KEY" in str(exc_info.value)
+
+def test_validate_passes_for_minimax_with_key(
+    self, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """provider=minimax 且 MINIMAX_API_KEY 设置时不应抛错。"""
+    monkeypatch.setenv("PRIVATE_TEACHER_LLM_PROVIDER", "minimax")
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+
+    settings = AppSettings.load()
+    settings.validate_for_runtime()  # 不应抛错
+```
+
+#### 5) `tests/unit/test_llm_factory.py` —— 在 `TestBuildChatModel` 类里追加
+
+```python
+def test_minimax_returns_chat_openai(
+    self, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """provider=minimax 应返回 ChatOpenAI 实例（OpenAI 兼容协议）。"""
+    monkeypatch.setenv("MINIMAX_API_KEY", "test-minimax-key")
+    settings = LLMSettings(
+        provider="minimax",
+        minimax_model="minimaxm3",
+        minimax_base_url="https://api.minimax.com/v1",
+    )
+
+    model = build_chat_model(settings)
+
+    from langchain_openai import ChatOpenAI
+    assert isinstance(model, ChatOpenAI)
+    # 进一步验证 base_url 配置正确
+    assert model.openai_api_base == "https://api.minimax.com/v1"  # type: ignore[attr-defined]
+
+def test_minimax_without_key_raises(
+    self, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """provider=minimax 缺 key 时应抛 ConfigurationError。"""
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    settings = LLMSettings(provider="minimax")
+
+    with pytest.raises(ConfigurationError) as exc_info:
+        build_chat_model(settings)
+    assert "MINIMAX_API_KEY" in str(exc_info.value)
+```
+
+### 20.3 验证清单
+
+按顺序跑下面这些命令，全部通过才算改完：
+
+```bash
+# 1. 静态检查
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy \
+  src/private_teacher/config.py \
+  src/private_teacher/llm/factory.py \
+  src/private_teacher/utils/exceptions.py
+
+# 2. 跑所有单元测试
+uv run pytest -m "not requires_llm" -v
+
+# 3. 专门跑 minimax 相关测试
+uv run pytest -v -k "minimax"
+# 预期看到至少 4 个测试通过：
+#   test_validate_raises_for_minimax_without_key  PASSED
+#   test_validate_passes_for_minimax_with_key     PASSED
+#   test_minimax_returns_chat_openai              PASSED
+#   test_minimax_without_key_raises               PASSED
+
+# 4. 实际调用 minimax（需要真 key）
+cp .env.example .env
+# 在 .env 里填：
+#   PRIVATE_TEACHER_LLM_PROVIDER=minimax
+#   MINIMAX_API_KEY=<你的真 key>
+make hello-llm
+```
+
+### 20.4 设计要点解释
+
+**Q1：为什么 minimax 复用 `ChatOpenAI` 而不是自己写一个 `ChatMiniMax`？**
+
+> 因为 MiniMax 提供的是 **OpenAI 兼容 API**（绝大多数新晋 LLM 服务商都这么做，复用 OpenAI 协议 = 复用 LangChain 生态）。
+> 关键就是把 `base_url` 指向 MiniMax 的网关，剩下的 `model` / `api_key` / 鉴权头都跟 OpenAI 一模一样。
+> **好处**：零额外依赖、零新代码、立刻能用 LangChain 全部能力（流式、async、tools）。
+
+**Q2：为什么不用 `langchain-minimax` 这种独立包？**
+
+> 目前没有官方 langchain-minimax 包（你可以提交一个 PR）。
+> 等有了再独立成 `ChatMiniMax` 类也来得及——到时候只需把 `case "minimax":` 里的 `ChatOpenAI(...)` 换成 `ChatMiniMax(...)` 即可，上层调用方零改动。
+
+**Q3：MINIMAX_API_KEY 为什么不放在 LLMSettings 字段里而是走环境变量？**
+
+> 同 Claude / OpenAI 一样，**安全考虑**：
+> - `LLMSettings.model_dump()` 会把字段序列化成 dict，**不应**包含 key
+> - 日志、`__repr__`、错误信息也都不应包含 key
+> - 环境变量是 OS 级别的敏感信息隔离机制
+
+**Q4：minimaxm3 是哪个模型？**
+
+> 按你要求，默认模型名是 `minimaxm3`。
+> 如果 MiniMax 后续发布新模型（如 `minimaxm4`），改 `.env` 里的 `PRIVATE_TEACHER_LLM_MINIMAX_MODEL` 即可，**不需要改代码**。
+
+### 20.5 常见踩坑
+
+| 现象 | 原因 | 解决 |
+| --- | --- | --- |
+| `ConfigurationError: 缺少 MINIMAX_API_KEY` | 没在 `.env` 里配 | 编辑 `.env`，加 `MINIMAX_API_KEY=...` |
+| `404 Not Found` | base_url 配错了 | 检查 `PRIVATE_TEACHER_LLM_MINIMAX_BASE_URL` |
+| `401 Unauthorized` | key 错误或过期 | 重新去 MiniMax 控制台申请 |
+| `Model not found: minimaxm3` | 模型名拼错 | 确认 MiniMax 文档里实际叫 `minimaxm3`（注意大小写） |
+| 测试 `assert model.openai_api_base == ...` 失败 | LangChain 版本升级改了属性名 | 改成 `assert "minimax.com" in str(model.openai_api_base)` 更稳 |
+
+> 💡 **下一步**：改完跑 `make ci`，全绿后可以 git commit（commit message: `feat(llm): add minimax provider`）。
+
