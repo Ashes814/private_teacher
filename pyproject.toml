@@ -167,6 +167,12 @@ pretty = true
 # 按文件输出结果
 show_absolute_path = false
 
+# ⬇️ 禁用全局错误码（langchain stub 不全会误报）
+disable_error_code = [
+    "call-arg",   # 调用第三方库参数名误报
+    "arg-type",   # SecretStr 类型不匹配误报
+]
+
 # ⬇️ 第三方库容忍度高
 [[tool.mypy.overrides]]
 module = [
