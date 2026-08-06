@@ -90,3 +90,39 @@ def settings():
     from private_teacher.config import AppSettings
 
     return AppSettings.load()
+
+# ============================================================
+# Phase 1：数据库 fixture
+# ============================================================
+import sqlite3
+from collections.abc import Iterator
+from pathlib import Path
+
+
+@pytest.fixture
+def tmp_db(tmp_path: Path) -> Iterator[sqlite3.Connection]:
+    """一个建好表的临时数据库连接，测试结束自动销毁。
+
+    tmp_path 是 pytest 内置 fixture：每个测试函数独享一个空目录，
+    测试结束后 pytest 自动清理（默认保留最近 3 次运行，方便排查）。
+
+    为什么用真数据库而不是 mock？
+      - SQLite 建一个内存/临时库只要几毫秒，比写 mock 便宜
+      - mock 数据库最容易出现"测试全过，上线全崩"——SQL 语法错误 mock 根本发现不了
+    """
+    from private_teacher.storage.db import Database, init_db
+
+    db_path = tmp_path / "test.db"
+    with Database(db_path) as conn:
+        init_db(conn)
+        # yield 之前的代码 = setup，之后的代码 = teardown
+        # 这里 teardown 交给 with 语句（自动 commit + close）
+        yield conn
+
+
+@pytest.fixture
+def sample_course(tmp_db: sqlite3.Connection):
+    """预置一门课，省得每个测试都手写创建逻辑。"""
+    from private_teacher.storage import course_repo
+
+    return course_repo.create(tmp_db, name="测试课程", description="用于单元测试")

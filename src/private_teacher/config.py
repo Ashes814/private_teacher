@@ -4,10 +4,17 @@ import os
 from pathlib import Path
 from typing import Literal
 
+from dotenv import load_dotenv
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from private_teacher.utils.exceptions import ConfigurationError
+
+# 1. 程序启动时立即加载 .env 文件到 os.environ
+# 这一步必须在所有其他代码之前执行，确保后续 os.getenv() 能读到 .env 里的值
+# pydantic-settings 的 env_file 只对它自己定义的字段生效，
+# 像 ANTHROPIC_API_KEY / MINIMAX_API_KEY 这种「非字段」的 key 必须用 dotenv 显式加载
+load_dotenv()
 
 
 class LLMSettings(BaseSettings):
