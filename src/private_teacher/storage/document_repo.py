@@ -57,12 +57,7 @@ def create(
         raise ValueError(f"category 必须是 {VALID_CATEGORIES} 之一，收到 {category!r}")
 
     if mtime is None:
-        if path.exists():
-            # st_mtime 是 Unix 时间戳（float），转成带时区的 datetime
-            mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
-        else:
-            # 测试里常传虚构路径，兜底成当前时间，不要因此崩掉
-            mtime = now_utc()
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC) if path.exists() else now_utc()
 
     doc_id = _new_id()
 
@@ -97,12 +92,6 @@ def get_by_id(conn: sqlite3.Connection, document_id: str) -> Document | None:
     ).fetchone()
     return Document.from_row(row) if row else None
 
-def get_by_id(conn: sqlite3.Connection, document_id: str) -> Document | None:
-    row = conn.execute(
-        "SELECT * FROM documents WHERE id = ?",
-        (document_id,),
-    ).fetchone()
-    return Document.from_row(row) if row else None
 
 
 def get_by_sha256(

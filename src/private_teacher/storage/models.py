@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+
 # ============================================================
 # 时间序列化辅助函数
 # ============================================================
@@ -41,7 +42,7 @@ def from_iso(value: str | None) -> datetime | None:
     """ISO8601 字符串 → datetime（用于读库）。None / 空串 → None。"""
     if not value:
         return None
-    
+
     return datetime.fromisoformat(value)
 
 # ============================================================
@@ -79,9 +80,9 @@ class Course:
             # 所以这里断言它一定有值（mypy 需要这个提示）
             created_at=from_iso(row["created_at"]), #type: ignore[arg-type]
             updated_at=from_iso(row["updated_at"]), #type: ignore[arg-type]
-            
+
         )
-    
+
 
 @dataclass(slots=True)
 class Document:
@@ -100,12 +101,12 @@ class Document:
     def is_indexed(self) -> bool:
         """是否已进入向量库。UI 上用它显示 ✅ / ⏳ 图标。"""
         return self.indexed_at is not None
-    
+
     @property
     def exists(self) -> bool:
         """物理文件是否还在（可能被用户手动删了）。"""
         return self.path.exists()
-    
+
     @classmethod
     def from_row(cls, row: sqlite3.Row) -> Document:
         return cls(

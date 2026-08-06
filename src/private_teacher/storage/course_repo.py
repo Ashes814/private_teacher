@@ -111,7 +111,7 @@ def update(
     course = get_by_id(conn, course_id)
     if course is None:
         return None
-    
+
 
     # None 表示"不改这个字段"，所以用旧值兜底
     new_name = name if name is not None else course.name

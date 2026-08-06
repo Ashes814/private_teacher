@@ -153,7 +153,7 @@ class Database:
         self,
         exc_type: type[BaseException] | None,
         exc: BaseException | None,
-        tb: TracebackType | None,  # noqa: ARG002 - 协议签名需要
+        tb: TracebackType | None,
     ) -> bool:
         """退出 with 块。
 

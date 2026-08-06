@@ -18,6 +18,7 @@ from private_teacher.storage import course_repo, document_repo
 from private_teacher.storage.db import Database, init_db
 from private_teacher.storage.models import Course, Document, from_iso, to_iso
 
+
 # ============================================================
 # db.py
 # ============================================================
@@ -54,13 +55,12 @@ class TestDatabase:
         with Database(db_path) as conn:
             init_db(conn)
 
-        with pytest.raises(RuntimeError):
-            with Database(db_path) as conn:
-                conn.execute(
-                    "INSERT INTO courses VALUES ('x','n','',?,?)",
-                    (to_iso(datetime.now()), to_iso(datetime.now())),
-                )
-                raise RuntimeError("模拟业务异常")
+        with pytest.raises(RuntimeError), Database(db_path) as conn:
+            conn.execute(
+                "INSERT INTO courses VALUES ('x','n','',?,?)",
+                (to_iso(datetime.now()), to_iso(datetime.now())),
+            )
+            raise RuntimeError("模拟业务异常")
 
         # 重新打开检查：那条数据不该存在
         with Database(db_path) as conn:

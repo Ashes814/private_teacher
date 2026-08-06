@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import sqlite3
+from collections.abc import Iterator
+from pathlib import Path
+
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from loguru import logger
@@ -94,9 +98,7 @@ def settings():
 # ============================================================
 # Phase 1：数据库 fixture
 # ============================================================
-import sqlite3
-from collections.abc import Iterator
-from pathlib import Path
+
 
 
 @pytest.fixture
