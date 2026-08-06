@@ -34,9 +34,11 @@ def now_utc() -> datetime:
     """
     return datetime.now(UTC)
 
+
 def to_iso(dt: datetime | None) -> str | None:
     """datetime → ISO8601 字符串（用于写库）。None 原样返回。"""
     return None if dt is None else dt.isoformat()
+
 
 def from_iso(value: str | None) -> datetime | None:
     """ISO8601 字符串 → datetime（用于读库）。None / 空串 → None。"""
@@ -45,9 +47,11 @@ def from_iso(value: str | None) -> datetime | None:
 
     return datetime.fromisoformat(value)
 
+
 # ============================================================
 # 领域对象
 # ============================================================
+
 
 @dataclass(slots=True)
 class Course:
@@ -78,9 +82,8 @@ class Course:
             description=row["description"] or "",
             # from_iso 返回 datetime | None，但 created_at 在 schema 里是 NOT NULL，
             # 所以这里断言它一定有值（mypy 需要这个提示）
-            created_at=from_iso(row["created_at"]), #type: ignore[arg-type]
-            updated_at=from_iso(row["updated_at"]), #type: ignore[arg-type]
-
+            created_at=from_iso(row["created_at"]),  # type: ignore[arg-type]
+            updated_at=from_iso(row["updated_at"]),  # type: ignore[arg-type]
         )
 
 
@@ -88,14 +91,14 @@ class Course:
 class Document:
     """一个课件文件。"""
 
-    id:str
+    id: str
     course_id: str
     path: Path
-    category: str # "main" | "auxiliary"
+    category: str  # "main" | "auxiliary"
     sha256: str
     size: int
     mtime: datetime
-    indexed_at: datetime | None # None = 还没建索引
+    indexed_at: datetime | None  # None = 还没建索引
 
     @property
     def is_indexed(self) -> bool:
@@ -118,7 +121,6 @@ class Document:
             category=row["category"],
             sha256=row["sha256"],
             size=row["size"],
-            mtime=from_iso(row["mtime"]), # type: ignore[arg-type]
+            mtime=from_iso(row["mtime"]),  # type: ignore[arg-type]
             indexed_at=from_iso(row["indexed_at"]),
-
         )

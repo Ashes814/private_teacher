@@ -48,8 +48,8 @@ def create(conn: sqlite3.Connection, name: str, description: str = "") -> Course
         新建的 Course 对象（含生成的 id 和时间戳）
     """
 
-    course_id=_new_id()
-    now=now_utc()
+    course_id = _new_id()
+    now = now_utc()
 
     conn.execute(
         # ⚠️ 永远用 ? 占位符，永远不要用 f-string 拼 SQL
@@ -91,17 +91,16 @@ def get_by_id(conn: sqlite3.Connection, course_id: str) -> Course | None:
 
 def list_all(conn: sqlite3.Connection) -> list[Course]:
     """列出所有课程，最近更新的排前面。"""
-    rows = conn.execute(
-        "SELECT * FROM courses ORDER BY updated_at DESC"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM courses ORDER BY updated_at DESC").fetchall()
 
     return [Course.from_row(r) for r in rows]
 
+
 def update(
-        conn: sqlite3.Connection,
-        course_id: str,
-        name: str | None = None,
-        description: str | None = None,
+    conn: sqlite3.Connection,
+    course_id: str,
+    name: str | None = None,
+    description: str | None = None,
 ) -> Course | None:
     """更新课程。传 None 的字段保持不变。
 
@@ -111,7 +110,6 @@ def update(
     course = get_by_id(conn, course_id)
     if course is None:
         return None
-
 
     # None 表示"不改这个字段"，所以用旧值兜底
     new_name = name if name is not None else course.name
@@ -155,6 +153,7 @@ def delete(conn: sqlite3.Connection, course_id: str) -> None:
     conn.commit()
     logger.info(f"删除课程：id={course_id}")
 
+
 def touch(conn: sqlite3.Connection, course_id: str) -> None:
     """只更新 updated_at。
 
@@ -166,4 +165,3 @@ def touch(conn: sqlite3.Connection, course_id: str) -> None:
         (to_iso(now_utc()), course_id),
     )
     conn.commit()
-

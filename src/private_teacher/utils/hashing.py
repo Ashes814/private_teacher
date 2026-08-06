@@ -14,6 +14,7 @@
   - 一个 500MB 的 PDF 如果 read_bytes() 一次读进内存，会瞬间吃掉 500MB
   - 分块（每次 1MB）读，内存占用恒定
 """
+
 from __future__ import annotations
 
 import hashlib

@@ -31,10 +31,7 @@ class TestDatabase:
             init_db(conn)  # 第二次，不该炸
             # sqlite_master 是 SQLite 的系统表，存了所有表结构
             tables = {
-                r["name"]
-                for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
+                r["name"] for r in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
         assert {"courses", "documents"} <= tables
 
@@ -66,6 +63,7 @@ class TestDatabase:
         with Database(db_path) as conn:
             assert conn.execute("SELECT COUNT(*) FROM courses").fetchone()[0] == 0
 
+
 # ============================================================
 # models.py
 # ============================================================
@@ -96,6 +94,7 @@ class TestModels:
         assert doc.is_indexed is False
         doc.indexed_at = datetime.now()
         assert doc.is_indexed is True
+
 
 # ============================================================
 # course_repo.py
@@ -135,9 +134,7 @@ class TestCourseRepo:
     def test_delete_cascades_documents(self, tmp_db: sqlite3.Connection) -> None:
         """删课程时它名下的文档应该一起消失。"""
         course = course_repo.create(tmp_db, name="A")
-        document_repo.create(
-            tmp_db, course.id, Path("a.pdf"), "main", "abc123", 100
-        )
+        document_repo.create(tmp_db, course.id, Path("a.pdf"), "main", "abc123", 100)
         assert len(document_repo.list_by_course(tmp_db, course.id)) == 1
 
         course_repo.delete(tmp_db, course.id)
@@ -151,27 +148,19 @@ class TestCourseRepo:
 # ============================================================
 class TestDocumentRepo:
     def test_create_returns_unindexed(self, sample_course, tmp_db) -> None:
-        doc = document_repo.create(
-            tmp_db, sample_course.id, Path("a.pdf"), "main", "h1", 100
-        )
+        doc = document_repo.create(tmp_db, sample_course.id, Path("a.pdf"), "main", "h1", 100)
         assert doc.indexed_at is None
         assert doc.is_indexed is False
 
     def test_invalid_category_raises(self, sample_course, tmp_db) -> None:
         with pytest.raises(ValueError, match="category"):
-            document_repo.create(
-                tmp_db, sample_course.id, Path("a.pdf"), "bad", "h1", 100
-            )
+            document_repo.create(tmp_db, sample_course.id, Path("a.pdf"), "bad", "h1", 100)
 
     def test_sha256_dedup(self, sample_course, tmp_db) -> None:
         """同一门课里，相同 sha256 不允许插两次。"""
-        document_repo.create(
-            tmp_db, sample_course.id, Path("a.pdf"), "main", "same", 100
-        )
+        document_repo.create(tmp_db, sample_course.id, Path("a.pdf"), "main", "same", 100)
         with pytest.raises(sqlite3.IntegrityError):
-            document_repo.create(
-                tmp_db, sample_course.id, Path("b.pdf"), "main", "same", 100
-            )
+            document_repo.create(tmp_db, sample_course.id, Path("b.pdf"), "main", "same", 100)
 
     def test_same_sha_allowed_across_courses(self, tmp_db) -> None:
         """不同课程可以各自持有同一份文件。"""
@@ -182,9 +171,7 @@ class TestDocumentRepo:
         # 没抛异常就算过
 
     def test_get_by_sha256(self, sample_course, tmp_db) -> None:
-        document_repo.create(
-            tmp_db, sample_course.id, Path("a.pdf"), "main", "hhh", 1
-        )
+        document_repo.create(tmp_db, sample_course.id, Path("a.pdf"), "main", "hhh", 1)
         assert document_repo.get_by_sha256(tmp_db, sample_course.id, "hhh") is not None
         assert document_repo.get_by_sha256(tmp_db, sample_course.id, "xxx") is None
 
@@ -199,9 +186,7 @@ class TestDocumentRepo:
 
     def test_mark_indexed_flow(self, sample_course, tmp_db) -> None:
         """未索引 → mark → 已索引 → mark_all_unindexed → 又回到未索引。"""
-        doc = document_repo.create(
-            tmp_db, sample_course.id, Path("a"), "main", "h1", 1
-        )
+        doc = document_repo.create(tmp_db, sample_course.id, Path("a"), "main", "h1", 1)
         assert len(document_repo.list_unindexed(tmp_db, sample_course.id)) == 1
 
         document_repo.mark_indexed(tmp_db, doc.id)

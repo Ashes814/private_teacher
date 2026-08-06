@@ -12,6 +12,7 @@ SQLite 连接管理
   - 直接写 SQL 能让你看清"到底发了什么语句"，学习价值更高
   - 需要的时候再迁移到 ORM 不难（Repository 模式已经把 SQL 隔离在一层里了）
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -25,10 +26,11 @@ from private_teacher.config import PathSettings
 # schema.sql 与本文件同目录，用 __file__ 定位，避免依赖"当前工作目录"
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
+
 def get_connection(
-        db_path: Path,
-        *,
-        check_same_thread: bool = True,
+    db_path: Path,
+    *,
+    check_same_thread: bool = True,
 ) -> sqlite3.Connection:
     """创建并配置一个 SQLite 连接。
 
@@ -107,11 +109,12 @@ class Database:
       - 忘记 close 会泄漏文件句柄
       - with 语句把这两件事变成语言层面的保证
     """
+
     def __init__(
-            self,
-            db_path: Path | str | None = None,
-            *,
-            check_same_thread: bool = True,
+        self,
+        db_path: Path | str | None = None,
+        *,
+        check_same_thread: bool = True,
     ) -> None:
         """
         Args:

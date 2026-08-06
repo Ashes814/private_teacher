@@ -21,8 +21,10 @@ from private_teacher.storage.models import Document, now_utc, to_iso
 # 合法的分类值。放成常量，避免各处硬编码字符串打错字
 VALID_CATEGORIES = ("main", "auxiliary")
 
+
 def _new_id() -> str:
     return uuid.uuid4().hex[:8]
+
 
 def create(
     conn: sqlite3.Connection,
@@ -85,13 +87,13 @@ def create(
         indexed_at=None,
     )
 
+
 def get_by_id(conn: sqlite3.Connection, document_id: str) -> Document | None:
     row = conn.execute(
         "SELECT * FROM documents WHERE id = ?",
         (document_id,),
     ).fetchone()
     return Document.from_row(row) if row else None
-
 
 
 def get_by_sha256(
@@ -114,10 +116,11 @@ def get_by_sha256(
     ).fetchone()
     return Document.from_row(row) if row else None
 
+
 def list_by_course(
-        conn: sqlite3.Connection,
-        course_id: str,
-        category: str | None = None,
+    conn: sqlite3.Connection,
+    course_id: str,
+    category: str | None = None,
 ) -> list[Document]:
     """列出某门课的文档。
 
@@ -139,6 +142,7 @@ def list_by_course(
 
     rows = conn.execute(sql, params).fetchall()
     return [Document.from_row(r) for r in rows]
+
 
 def list_unindexed(conn: sqlite3.Connection, course_id: str) -> list[Document]:
     """列出还没建索引的文档（indexed_at IS NULL）—— 增量索引用。
@@ -168,6 +172,7 @@ def get_indexed(conn: sqlite3.Connection, course_id: str) -> list[Document]:
     ).fetchall()
     return [Document.from_row(r) for r in rows]
 
+
 def mark_indexed(conn: sqlite3.Connection, document_id: str) -> None:
     """标记为"已建索引"，写入当前时间。"""
     conn.execute(
@@ -187,6 +192,7 @@ def mark_all_unindexed(conn: sqlite3.Connection, course_id: str) -> None:
         (course_id,),
     )
     conn.commit()
+
 
 def delete(conn: sqlite3.Connection, document_id: str) -> None:
     """删除文档记录（不删物理文件、不删向量）。"""
