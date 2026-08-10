@@ -45,6 +45,7 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.1.0",
     "pytest-mock>=3.15.1",
+    "reportlab>=5.0.0",
     "respx>=0.23.1",
     "ruff>=0.15.20",
     "vcrpy>=8.3.0",
