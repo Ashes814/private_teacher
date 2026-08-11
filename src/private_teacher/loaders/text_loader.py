@@ -41,17 +41,18 @@ def read_text_smart(path: Path) -> str:
         try:
             return path.read_text(encoding=encoding)
         except UnicodeDecodeError:
-            continue # 换下一种编码
+            continue  # 换下一种编码
         except OSError as exc:
             # 文件不存在 / 没权限 —— 换编码也没用，直接报错
             raise DocumentLoadError(
                 f"读取文件失败: {exc}",
                 path=str(path),
             ) from exc
-        
+
     # 所有编码都失败（几乎不可能，因为 latin-1 不会失败）
     logger.warning(f"{path.name} 编码识别失败，改用 replace 模式")
     return path.read_text(encoding="utf-8", errors="replace")
+
 
 def load_text(path: Path, **_kwargs: Any) -> list[Document]:
     """加载纯文本文件。
@@ -74,7 +75,7 @@ def load_text(path: Path, **_kwargs: Any) -> list[Document]:
     if not text.strip():
         logger.warning(f"跳过空文件：{path.name}")
         return []
-    
+
     meta = base_metadata(path)
     # 文本文件天然有行号，全部记下来，方便 §9 跳转
     meta[META_LINE_START] = 1

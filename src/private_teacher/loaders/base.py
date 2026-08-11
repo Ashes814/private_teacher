@@ -37,11 +37,12 @@ META_PAGE = "page"
 META_TOTAL_PAGES = "total_pages"
 META_LINE_START = "line_start"
 META_LINE_END = "line_end"
-META_CHUNK_ID = "chunk_id" 
+META_CHUNK_ID = "chunk_id"
 
 
 # Chroma 允许的 metadata值类型
 _ALLOWED_META_TYPES = (str, int, float, bool)
+
 
 def base_metadata(path: Path, page: int = 1, total_pages: int = 1) -> dict[str, Any]:
     """构造所有 loader 共用的基础 metadata。
@@ -68,6 +69,7 @@ def base_metadata(path: Path, page: int = 1, total_pages: int = 1) -> dict[str, 
         META_TOTAL_PAGES: total_pages,
     }
 
+
 def sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
     """清洗 metadata，保证能被 Chroma 接受。
 
@@ -82,7 +84,7 @@ def sanitize_metadata(meta: dict[str, Any]) -> dict[str, Any]:
     clean: dict[str, Any] = {}
     for key, value in meta.items():
         if value is None:
-            continue # 关键：整个 key 都不要，而不是写 None
+            continue  # 关键：整个 key 都不要，而不是写 None
         if isinstance(value, _ALLOWED_META_TYPES):
             clean[key] = value
         else:

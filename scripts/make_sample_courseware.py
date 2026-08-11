@@ -12,6 +12,7 @@
   - 生成脚本本身就是文档：一眼看出样本长什么样
   - 内容可控 —— 测试里可以断言"第 3 页一定包含'决策树'"
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -19,6 +20,7 @@ from pathlib import Path
 # 输出目录：脚本文件的上级目录 / tests/fixtures/courseware
 # parents[1] = scripts/ 的父目录 = 项目根目录
 OUT_DIR = Path(__file__).resolve().parents[1] / "tests" / "fixtures" / "courseware"
+
 
 def make_txt() -> None:
     """纯文本样本。"""
@@ -60,9 +62,7 @@ def make_python() -> None:
     """Python 代码样本，刻意写超过 100 行以便测试多 chunk 切分。"""
     header = '"""K 近邻分类器的教学实现。"""\n\nimport math\n\n\n'
     body = "\n".join(
-        f"def helper_{i}(x: float) -> float:\n"
-        f'    """第 {i} 个辅助函数。"""\n'
-        f"    return x * {i}\n"
+        f'def helper_{i}(x: float) -> float:\n    """第 {i} 个辅助函数。"""\n    return x * {i}\n'
         for i in range(1, 41)  # 40 个函数 × 3 行 ≈ 160 行
     )
     (OUT_DIR / "sample.py").write_text(header + body, encoding="utf-8")

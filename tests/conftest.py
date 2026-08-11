@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from collections.abc import Iterator
 from pathlib import Path
@@ -52,9 +53,18 @@ def tmp_env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> object:
     实现：
       1. 在 tmp_path 下创建 .env
       2. monkeypatch.chdir 到 tmp_path，让 pydantic 找到 .env
+      3. 清掉进程已加载的 PRIVATE_TEACHER_* 环境变量，
+         否则 config.py 顶部 load_dotenv() 已经把项目 .env 灌进去了，
+         pydantic-settings 会优先用 os.environ 里的旧值
     """
 
     monkeypatch.chdir(tmp_path)
+
+    # 清掉所有项目相关的环境变量（包括可能从项目 .env 加载进来的）
+    for key in list(os.environ):
+        if key.startswith("PRIVATE_TEACHER_"):
+            monkeypatch.delenv(key, raising=False)
+
     return tmp_path
 
 

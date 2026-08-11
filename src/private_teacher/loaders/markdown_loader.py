@@ -41,7 +41,6 @@ def load_markdown(path: Path, **_kwargs: Any) -> list[Document]:
         0 或 1 个 Document
     """
     raw = read_text_smart(path)
-    
 
     title: str | None = None
     body = raw
@@ -63,7 +62,7 @@ def load_markdown(path: Path, **_kwargs: Any) -> list[Document]:
 
     if not body.strip():
         return []
-    
+
     meta = base_metadata(path)
     # +1 因为行号从 1 开始
     meta[META_LINE_START] = offset + 1
