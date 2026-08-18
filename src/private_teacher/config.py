@@ -58,6 +58,34 @@ class LLMSettings(BaseSettings):
         default="https://api.minimax.com/v1", description="MiniMax API 基础地址"
     )
 
+    # ----- Embedding 配置 -----
+    # 注意：embedding 的 provider 和 chat 的 provider 是**独立**的。
+    # 常见组合：用 Claude 做对话（质量高），用本地 bge 做 embedding（省钱且快）。
+    embedding_provider: Literal["openai", "ollama", "huggingface", "hash"] = Field(
+        default="openai",
+        description="Embedding 提供方: openai / ollama / huggingface / hash (离线测试用)",
+    )
+
+    embedding_model: str = Field(
+        default="text-embedding3-small",
+        description="Embedding 模型名。openai: text-embedding-3-small；"
+        "ollama: nomic-embed-text；huggingface: BAAI/bge-small-zh-v1.5",
+    )
+    embedding_base_url: str | None = Field(
+        default=None,
+        description="Embedding 服务地址（走中转 API 时填）。留空用官方地址",
+    )
+    embedding_dimension: int = Field(
+        default=1536,
+        description="向量维度。⚠️ 必须与模型实际输出一致，否则 Chroma 写入报错。"
+        "text-embedding-3-small=1536, bge-small-zh=512, nomic-embed-text=768",
+    )
+    embedding_batch_size: int = Field(
+        default=64,
+        description="每批送多少条文本去向量化。太大容易超 API 的单请求上限，"
+        "太小则请求次数多、速度慢",
+    )
+
     # ----- pydantic-settings 配置 -----
     model_config = SettingsConfigDict(
         # 所有环境变量加前缀，避免与系统其他变量冲突

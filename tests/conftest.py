@@ -138,3 +138,34 @@ def sample_course(tmp_db: sqlite3.Connection):
     from private_teacher.storage import course_repo
 
     return course_repo.create(tmp_db, name="测试课程", description="用于单元测试")
+
+
+# ============================================================
+# Phase 1：Embedding fixture
+# ============================================================
+@pytest.fixture
+def fake_embedder():
+    """确定性的假 embedder（HashEmbedder，256 维）。
+
+    用 256 维而不是 1536 维：
+      - 测试里只关心"相似的文本向量更接近"，维度不影响这个性质
+      - 维度小 6 倍，测试快 6 倍
+    """
+    from private_teacher.rag.embeddings import HashEmbedder
+
+    return HashEmbedder(dimension=256)
+
+
+@pytest.fixture
+def hash_llm_settings():
+    """把 embedding provider 强制设成 hash 的 LLMSettings。
+
+    有了它，Indexer / Retriever / KBService 的测试都能完全离线跑，
+    不需要任何 API key。
+    """
+    from private_teacher.config import LLMSettings
+
+    return LLMSettings(
+        embedding_provider="hash",
+        embedding_dimension=256,
+    )
