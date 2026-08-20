@@ -13,6 +13,7 @@ from private_teacher.rag.manifest import IndexManifest, ManifestEntry
 from private_teacher.storage import course_repo, document_repo
 from private_teacher.utils.hashing import compute_sha256
 
+
 @pytest.fixture
 def paths(tmp_path: Path) -> PathSettings:
     return PathSettings(data_dir=tmp_path / "data")

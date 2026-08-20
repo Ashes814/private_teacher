@@ -71,7 +71,7 @@ class IndexResult:
         if self.errors:
             parts.append(f"⚠️ {len(self.errors)} 个失败")
         return "，".join(parts) + f"（耗时 {self.duration_seconds:.1f}s）"
-    
+
 class Indexer:
     """某一门课的知识库构建器。"""
 
@@ -149,7 +149,7 @@ class Indexer:
             on_progress=on_progress,
         )
         return len(ids)
-    
+
     # ============================================================
     # 增量构建
     # ============================================================
@@ -207,7 +207,7 @@ class Indexer:
                 result.errors.append(f"{doc.path.name}: {exc}")
                 logger.warning(f"索引失败 {doc.path.name}: {exc}")
                 continue
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:
                 result.errors.append(f"{doc.path.name}: {exc}")
                 logger.exception(f"索引 {doc.path.name} 时发生未预期错误")
                 continue
@@ -232,7 +232,7 @@ class Indexer:
         result.duration_seconds = time.perf_counter() - started
         logger.info(f"增量索引完成：{result.summary()}")
         return result
-    
+
     # ============================================================
     # 全量构建
     # ============================================================
@@ -266,7 +266,7 @@ class Indexer:
 
         # ④ 走增量流程（此时所有文件都是"新增"）
         return self.build_incremental(conn, on_file=on_file)
-    
+
     # ============================================================
     # 单文件维护
     # ============================================================
@@ -285,7 +285,7 @@ class Indexer:
         manifest.save(self.paths.data_dir)
 
         return n
-    
+
     # ============================================================
     # 状态查询
     # ============================================================
