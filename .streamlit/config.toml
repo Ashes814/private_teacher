@@ -1,0 +1,19 @@
+# Streamlit 全局配置（放在项目根目录）
+
+[server]
+# 上传文件大小上限（MB）。默认 200，课件 PDF 有时会超
+maxUploadSize = 500
+# 关掉自动打开浏览器（在服务器上跑时很烦）
+headless = true
+
+[browser]
+# 不上报使用统计 —— 本项目是 local-first
+gatherUsageStats = false
+
+[theme]
+base = "light"
+primaryColor = "#4F8BF9"
+
+[runner]
+# 保存文件后自动重跑，开发时很方便
+fastReruns = true

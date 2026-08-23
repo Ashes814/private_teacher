@@ -168,3 +168,25 @@ class GradingError(PrivateTeacherError):
     """
 
     pass
+
+
+class DuplicateDocumentError(PrivateTeacherError, FileExistsError):
+    """重复上传同一个文件（sha256 已存在）。
+
+    ⚠️ 注意这里的**多重继承**：
+      同时继承 PrivateTeacherError 和内置的 FileExistsError。
+
+    为什么这么做？
+      - 继承 PrivateTeacherError：上层可以用 `except PrivateTeacherError` 统一兜住
+      - 继承 FileExistsError：语义天然吻合，且调用方用
+        `except FileExistsError` 也能捕获（对 UI 代码更直观）
+      两个基类都直接/间接继承自 Exception，MRO 能正常解析，不会冲突。
+    """
+
+    pass
+
+
+class ServiceError(PrivateTeacherError):
+    """业务编排层的错误（参数非法、状态冲突等）。"""
+
+    pass

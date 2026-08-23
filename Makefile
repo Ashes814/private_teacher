@@ -154,3 +154,12 @@ info:  ## 显示环境信息
 	@echo "uv:      $$(uv --version)"
 	@echo "Project: $$(uv run python -c 'import private_teacher; print(private_teacher.__version__)')"
 	@echo "Data:    $$(uv run python -c 'from private_teacher.config import AppSettings; print(AppSettings.load().paths.data_dir)')"
+
+# ---------- Phase 1 ----------
+.PHONY: streamlit samples
+
+streamlit:  ## 启动 Streamlit 应用
+	uv run streamlit run src/private_teacher/app.py
+
+samples:  ## 生成测试用课件样本
+	uv run python scripts/make_sample_courseware.py
