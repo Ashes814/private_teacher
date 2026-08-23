@@ -204,6 +204,14 @@ class VectorStoreManager:
           - UI 上要显示"匹配度 87%"
           - Phase 6 的 rerank / 阈值过滤需要分数
         """
+        # ---------- 防御性检查 ----------
+        # 课程刚被删 / 从没建过索引：persist_dir 可能是空的或不存在，
+        # 这时调 chromadb 的 get_or_create 会触发底层 sqlite 的
+        # "readonly database" 错误（macOS 文件系统偶发）。
+        # 这种情况直接返回空，让上层优雅处理。
+        if not self.persist_dir.exists() or not any(self.persist_dir.iterdir()):
+            return []
+
         collection = self.get_collection()
 
         # 空库直接返回，否则 Chroma 在某些版本会报错

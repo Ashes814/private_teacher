@@ -16,9 +16,11 @@ from private_teacher.utils.exceptions import (
     ServiceError,
 )
 
+
 @pytest.fixture
 def paths(tmp_path: Path) -> PathSettings:
     return PathSettings(data_dir=tmp_path / "data")
+
 
 @pytest.fixture
 def service(paths) -> CourseService:
@@ -40,6 +42,7 @@ def src_file(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return f
+
 
 # ============================================================
 # 课程 CRUD
@@ -86,9 +89,7 @@ class TestUpload:
         with pytest.raises(DuplicateDocumentError):
             service.upload_document(tmp_db, course.id, src_file, "main")
 
-    def test_duplicate_is_also_fileexistserror(
-        self, tmp_db, service, src_file
-    ) -> None:
+    def test_duplicate_is_also_fileexistserror(self, tmp_db, service, src_file) -> None:
         """多重继承生效：用内置异常也能捕获。"""
         course = service.create_course(tmp_db, "Test")
         service.upload_document(tmp_db, course.id, src_file, "main")
@@ -96,9 +97,7 @@ class TestUpload:
         with pytest.raises(FileExistsError):
             service.upload_document(tmp_db, course.id, src_file, "main")
 
-    def test_same_name_different_content_renamed(
-        self, tmp_db, service, tmp_path
-    ) -> None:
+    def test_same_name_different_content_renamed(self, tmp_db, service, tmp_path) -> None:
         """⭐ 同名但内容不同 → 自动改名，不能互相覆盖。"""
         course = service.create_course(tmp_db, "Test")
 
@@ -170,9 +169,7 @@ class TestUpload:
 # 删除
 # ============================================================
 class TestDelete:
-    def test_delete_document_removes_everything(
-        self, tmp_db, service, kb, src_file
-    ) -> None:
+    def test_delete_document_removes_everything(self, tmp_db, service, kb, src_file) -> None:
         course = service.create_course(tmp_db, "Test")
         doc = service.upload_document(tmp_db, course.id, src_file)
         kb.build_kb(tmp_db, course.id)
@@ -184,9 +181,7 @@ class TestDelete:
         assert document_repo.get_by_id(tmp_db, doc.id) is None  # 记录没了
         assert kb.search(course.id, "机器学习") == []  # 向量也没了
 
-    def test_delete_course_removes_everything(
-        self, tmp_db, service, kb, src_file, paths
-    ) -> None:
+    def test_delete_course_removes_everything(self, tmp_db, service, kb, src_file, paths) -> None:
         """⭐ 删课程后：文件、数据库、向量库三处都要干净。"""
         course = service.create_course(tmp_db, "Test")
         service.upload_document(tmp_db, course.id, src_file)
@@ -211,9 +206,7 @@ class TestStats:
     def test_counts(self, tmp_db, service, kb, tmp_path) -> None:
         course = service.create_course(tmp_db, "Test")
         service.upload_bytes(tmp_db, course.id, "a.txt", b"main content", "main")
-        service.upload_bytes(
-            tmp_db, course.id, "b.txt", b"aux content", "auxiliary"
-        )
+        service.upload_bytes(tmp_db, course.id, "b.txt", b"aux content", "auxiliary")
 
         stats = service.get_stats(tmp_db, course.id)
 

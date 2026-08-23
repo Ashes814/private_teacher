@@ -33,6 +33,7 @@ from private_teacher.utils.exceptions import (
 )
 from private_teacher.utils.hashing import compute_sha256, compute_sha256_bytes
 
+
 @dataclass(slots=True)
 class CourseStats:
     """课程概览，UI 卡片用。"""
@@ -47,14 +48,15 @@ class CourseStats:
     @property
     def total_size_mb(self) -> float:
         return self.total_size / 1024 / 1024
-    
+
     @property
     def index_progress(self) -> float:
         """已索引比例 0.0~1.0（进度条用）。"""
         if self.total_documents == 0:
             return 0.0
         return self.indexed_documents / self.total_documents
-    
+
+
 class CourseService:
     """课程与课件管理。"""
 
@@ -70,7 +72,6 @@ class CourseService:
         name: str,
         description: str = "",
     ) -> Course:
-        
         """创建课程，并建好物理目录。
 
         Raises:
@@ -86,23 +87,21 @@ class CourseService:
         # 立刻建目录：晚建不如早建，
         # 否则上传时才发现建不了（权限/磁盘满）会让用户丢文件
         for category in ("main", "auxiliary"):
-            (self.paths.course_dir(course.id) / category).mkdir(
-                parents=True, exist_ok=True
-            )
+            (self.paths.course_dir(course.id) / category).mkdir(parents=True, exist_ok=True)
 
         logger.info(f"课程已创建：{name}（{course.id}）")
         return course
-    
+
     def list_courses(self, conn: sqlite3.Connection) -> list[Course]:
         return course_repo.list_all(conn)
-    
+
     def get_course(self, conn: sqlite3.Connection, course_id: str) -> Course:
         """取课程，不存在就抛异常（UI 上是"页面不该出现"的状态）。"""
         course = course_repo.get_by_id(conn, course_id)
         if course is None:
             raise ServiceError("课程不存在", course_id=course_id)
         return course
-    
+
     def update_course(
         self,
         conn: sqlite3.Connection,
@@ -114,7 +113,7 @@ class CourseService:
         if updated is None:
             raise ServiceError("课程不存在", course_id=course_id)
         return updated
-    
+
     def delete_course(self, conn: sqlite3.Connection, course_id: str) -> None:
         """彻底删除课程：数据库 + 文件 + 向量库。
 
@@ -179,7 +178,7 @@ class CourseService:
                 f"不支持的格式: {source_path.suffix}",
                 path=str(source_path),
             )
-        
+
         # ---------- 2. 内容去重 ----------
         # 先算哈希再复制：重复文件根本不该占磁盘
         sha = compute_sha256(source_path)
@@ -201,9 +200,7 @@ class CourseService:
 
         # ---------- 4. 登记 ----------
         try:
-            doc = document_repo.create(
-                conn, course_id, dest, category, sha, dest.stat().st_size
-            )
+            doc = document_repo.create(conn, course_id, dest, category, sha, dest.stat().st_size)
         except Exception:
             # 写库失败要把刚复制的文件删掉，否则留下无主的孤儿文件
             dest.unlink(missing_ok=True)
@@ -212,7 +209,7 @@ class CourseService:
         course_repo.touch(conn, course_id)  # 把课程顶到列表最前
         logger.info(f"上传成功：{dest.name} → {course_id}/{category}")
         return doc
-    
+
     def upload_bytes(
         self,
         conn: sqlite3.Connection,
@@ -249,16 +246,14 @@ class CourseService:
         dest.write_bytes(data)
 
         try:
-            doc = document_repo.create(
-                conn, course_id, dest, category, sha, len(data)
-            )
+            doc = document_repo.create(conn, course_id, dest, category, sha, len(data))
         except Exception:
             dest.unlink(missing_ok=True)
             raise
 
         course_repo.touch(conn, course_id)
         return doc
-    
+
     @staticmethod
     def _unique_dest(dest_dir: Path, filename: str) -> Path:
         """避免同名文件互相覆盖：a.pdf → a_1.pdf → a_2.pdf
@@ -278,7 +273,7 @@ class CourseService:
                 return candidate
 
         raise ServiceError(f"同名文件过多，无法生成唯一文件名: {filename}")
-    
+
     # ============================================================
     # 文档删除与查询
     # ============================================================
@@ -293,9 +288,7 @@ class CourseService:
             raise ServiceError("文档不存在", document_id=document_id)
 
         # ① 向量
-        VectorStoreManager(doc.course_id, self.paths.data_dir).delete_by_source(
-            doc.path
-        )
+        VectorStoreManager(doc.course_id, self.paths.data_dir).delete_by_source(doc.path)
 
         # ② 从 manifest 里移除（否则增量索引会以为它还在）
         from private_teacher.rag.manifest import IndexManifest
@@ -357,9 +350,7 @@ class CourseService:
 
         for file in iter_loadable_files(dir_path):
             try:
-                imported.append(
-                    self.upload_document(conn, course_id, file, category)
-                )
+                imported.append(self.upload_document(conn, course_id, file, category))
             except DuplicateDocumentError:
                 skipped.append(f"{file.name}: 内容重复")
             except (DocumentLoadError, ServiceError) as exc:

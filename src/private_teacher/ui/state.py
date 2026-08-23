@@ -58,6 +58,7 @@ def get_conn() -> sqlite3.Connection:
     init_db(conn)  # 幂等，每次启动跑一下保证表存在
     return conn
 
+
 @st.cache_resource
 def get_course_service() -> CourseService:
     return CourseService(get_settings().paths)
@@ -73,10 +74,12 @@ def get_kb_service() -> KBService:
     settings = get_settings()
     return KBService(settings.llm, settings.paths)
 
+
 # ============================================================
 # 当前选中课程（跨页面共享）
 # ============================================================
 CURRENT_COURSE_KEY = "current_course_id"
+
 
 def get_current_course_id() -> str | None:
     """读当前选中的课程 id。
@@ -89,6 +92,7 @@ def get_current_course_id() -> str | None:
 
 def set_current_course_id(course_id: str | None) -> None:
     st.session_state[CURRENT_COURSE_KEY] = course_id
+
 
 def course_selector(label: str = "当前课程") -> str | None:
     """侧边栏的课程选择器（两个页面共用）。
@@ -117,4 +121,3 @@ def course_selector(label: str = "当前课程") -> str | None:
     )
     set_current_course_id(selected)
     return selected
-

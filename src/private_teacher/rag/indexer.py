@@ -72,6 +72,7 @@ class IndexResult:
             parts.append(f"⚠️ {len(self.errors)} 个失败")
         return "，".join(parts) + f"（耗时 {self.duration_seconds:.1f}s）"
 
+
 class Indexer:
     """某一门课的知识库构建器。"""
 
@@ -298,9 +299,7 @@ class Indexer:
             "documents_total": len(docs),
             "documents_indexed": len(manifest.entries),
             "documents_pending": sum(
-                1
-                for d in docs
-                if manifest.needs_index(str(d.path.resolve()), d.sha256)
+                1 for d in docs if manifest.needs_index(str(d.path.resolve()), d.sha256)
             ),
             "chunks_in_manifest": manifest.total_chunks,
             "vectors_in_store": self.store.count(),

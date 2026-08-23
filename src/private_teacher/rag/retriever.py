@@ -32,6 +32,7 @@ from private_teacher.rag.vector_store import VectorStoreManager
 @dataclass(slots=True)
 class RetrievalResult:
     """一条检索结果。"""
+
     document: Document
     score: float  # 相似度，越大越相关
     rank: int  # 名次，从 1 开始
@@ -71,8 +72,10 @@ class RetrievalResult:
 
         return " ".join(parts)
 
+
 class Retriever:
     """某门课的向量检索器。"""
+
     def __init__(
         self,
         course_id: str,
@@ -176,9 +179,7 @@ class Retriever:
             # 分数也放进 metadata 一份，方便直接传给只认 Document 的下游
             doc.metadata["score"] = round(score, 4)
 
-            results.append(
-                RetrievalResult(document=doc, score=score, rank=len(results) + 1)
-            )
+            results.append(RetrievalResult(document=doc, score=score, rank=len(results) + 1))
 
             if len(results) >= k:
                 break
@@ -249,8 +250,8 @@ class Retriever:
         return self.store.count() > 0
 
 
-#rank-bm25 已经在依赖里了，这里给出完整实现。
-#建议 Phase 1 先只用向量检索，把全链路跑通再回来加这一层。
+# rank-bm25 已经在依赖里了，这里给出完整实现。
+# 建议 Phase 1 先只用向量检索，把全链路跑通再回来加这一层。
 # 追加到 src/private_teacher/rag/retriever.py 末尾
 # class HybridRetriever:
 #     """向量检索 + BM25 关键词检索，用 RRF 融合。

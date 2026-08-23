@@ -23,6 +23,7 @@ def paths(tmp_path: Path) -> PathSettings:
 def course(tmp_db: sqlite3.Connection):
     return course_repo.create(tmp_db, name="测试课程")
 
+
 def add_file(
     conn: sqlite3.Connection,
     course_id: str,
@@ -44,6 +45,7 @@ def add_file(
         compute_sha256(path),
         path.stat().st_size,
     )
+
 
 @pytest.fixture
 def indexer(course, hash_llm_settings, paths, fake_embedder) -> Indexer:
@@ -100,9 +102,7 @@ class TestManifest:
 
         assert m.needs_index("/a.txt", "sha1") is True  # 全新
 
-        m.upsert(
-            ManifestEntry("/a.txt", "sha1", 1, "2026-01-01T00:00:00+00:00")
-        )
+        m.upsert(ManifestEntry("/a.txt", "sha1", 1, "2026-01-01T00:00:00+00:00"))
         assert m.needs_index("/a.txt", "sha1") is False  # 没变
         assert m.needs_index("/a.txt", "sha2") is True  # 变了
 
@@ -112,6 +112,7 @@ class TestManifest:
         m.upsert(ManifestEntry("/b.txt", "s", 1, "t"))
 
         assert m.stale_sources({"/a.txt"}) == ["/b.txt"]
+
 
 # ============================================================
 # 全量构建
@@ -150,9 +151,7 @@ class TestBuildFull:
         assert len(manifest.entries) == 1
         assert manifest.total_chunks >= 1
 
-    def test_rebuild_does_not_duplicate(
-        self, tmp_db, course, tmp_path, indexer
-    ) -> None:
+    def test_rebuild_does_not_duplicate(self, tmp_db, course, tmp_path, indexer) -> None:
         """⭐ 全量重建两次，向量数不应翻倍。"""
         add_file(tmp_db, course.id, tmp_path, "a.txt", "重建测试内容文本")
 
@@ -185,9 +184,7 @@ class TestBuildIncremental:
         assert result.documents_indexed == 1  # 只处理了新的
         assert result.documents_skipped == 1  # 老的被跳过
 
-    def test_second_run_skips_everything(
-        self, tmp_db, course, tmp_path, indexer
-    ) -> None:
+    def test_second_run_skips_everything(self, tmp_db, course, tmp_path, indexer) -> None:
         add_file(tmp_db, course.id, tmp_path, "a.txt", "内容没有任何变化")
 
         indexer.build_incremental(tmp_db)
@@ -215,9 +212,7 @@ class TestBuildIncremental:
         assert result.documents_indexed == 1
         assert result.documents_skipped == 0
 
-    def test_deleted_file_cleaned_up(
-        self, tmp_db, course, tmp_path, indexer
-    ) -> None:
+    def test_deleted_file_cleaned_up(self, tmp_db, course, tmp_path, indexer) -> None:
         """⭐ 数据库里删掉的文档，它的向量残留必须被清理。"""
         doc = add_file(tmp_db, course.id, tmp_path, "a.txt", "将要被删除的内容")
         add_file(tmp_db, course.id, tmp_path, "b.txt", "会保留下来的内容")
@@ -230,13 +225,9 @@ class TestBuildIncremental:
         assert result.documents_removed == 1
         assert "/a.txt" not in " ".join(indexer.store.list_sources())
 
-    def test_shrinking_file_removes_old_chunks(
-        self, tmp_db, course, tmp_path, indexer
-    ) -> None:
+    def test_shrinking_file_removes_old_chunks(self, tmp_db, course, tmp_path, indexer) -> None:
         """⚠️ 文件变短后，多余的旧 chunk 必须消失（不能留幽灵内容）。"""
-        doc = add_file(
-            tmp_db, course.id, tmp_path, "a.txt", "长内容段落。" * 500
-        )
+        doc = add_file(tmp_db, course.id, tmp_path, "a.txt", "长内容段落。" * 500)
         indexer.build_incremental(tmp_db)
         n_before = indexer.store.count()
         assert n_before >= 3
@@ -251,9 +242,7 @@ class TestBuildIncremental:
 
         assert indexer.store.count() < n_before
 
-    def test_missing_physical_file_reported(
-        self, tmp_db, course, tmp_path, indexer
-    ) -> None:
+    def test_missing_physical_file_reported(self, tmp_db, course, tmp_path, indexer) -> None:
         """物理文件被手删 → 记进 errors，但不中断整批。"""
         doc = add_file(tmp_db, course.id, tmp_path, "a.txt", "会被删掉的文件")
         add_file(tmp_db, course.id, tmp_path, "b.txt", "正常存在的文件内容")
@@ -266,9 +255,7 @@ class TestBuildIncremental:
         assert "a.txt" in result.errors[0]
         assert result.documents_indexed == 1  # b.txt 仍然成功
 
-    def test_unsupported_file_reported(
-        self, tmp_db, course, tmp_path, indexer
-    ) -> None:
+    def test_unsupported_file_reported(self, tmp_db, course, tmp_path, indexer) -> None:
         """不支持的格式记入 errors，不抛异常。"""
         add_file(tmp_db, course.id, tmp_path, "a.exe", "二进制内容")
 
@@ -282,12 +269,11 @@ class TestBuildIncremental:
         add_file(tmp_db, course.id, tmp_path, "b.txt", "内容乙乙乙乙乙")
 
         seen: list[tuple[int, int, str]] = []
-        indexer.build_incremental(
-            tmp_db, on_file=lambda i, n, name: seen.append((i, n, name))
-        )
+        indexer.build_incremental(tmp_db, on_file=lambda i, n, name: seen.append((i, n, name)))
 
         assert len(seen) == 2
         assert seen[0][1] == 2  # 总数正确
+
 
 # ============================================================
 # 元数据注入 & 统计
@@ -297,9 +283,7 @@ class TestMetadataAndStats:
         self, tmp_db, course, tmp_path, indexer, fake_embedder
     ) -> None:
         """chunk 里必须带上 course_id / document_id / category。"""
-        doc = add_file(
-            tmp_db, course.id, tmp_path, "a.txt", "课程内容文本", "auxiliary"
-        )
+        doc = add_file(tmp_db, course.id, tmp_path, "a.txt", "课程内容文本", "auxiliary")
         indexer.build_full(tmp_db)
 
         hit = indexer.store.similarity_search(fake_embedder, "课程", k=1)[0]
@@ -336,7 +320,9 @@ class TestIndexResult:
         from private_teacher.rag.indexer import IndexResult
 
         r = IndexResult(
-            documents_indexed=3, chunks_added=42, documents_skipped=1,
+            documents_indexed=3,
+            chunks_added=42,
+            documents_skipped=1,
             duration_seconds=1.234,
         )
         s = r.summary()

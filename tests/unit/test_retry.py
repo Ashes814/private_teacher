@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import time
+from itertools import pairwise
 
 import pytest
 
@@ -77,9 +78,10 @@ class TestRetryDecorator:
             raises_key_error()
         assert call_count["n"] == 1  # 只调了 1 次
 
-    def test_wait_time_grows_exponentially(self) -> None:
+    def test_wait_time_grows_exponentially(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """等待时间应大致呈指数增长（带抖动）。"""
         timestamps: list[float] = []
+        sleeps: list[float] = []  # 记录每次 sleep 的"请求时长"
 
         @make_retry_decorator(
             max_attempts=4,
@@ -91,14 +93,24 @@ class TestRetryDecorator:
             timestamps.append(time.monotonic())
             raise ValueError("fail")
 
+        # 把 time.sleep 替换成"只记录、不真睡"
+        # tenacity 内部最终也是调 time.sleep，所以这一行覆盖所有 retry 路径
+        # 这样测试只关心退避逻辑本身，不受系统负载 / CI 抖动影响
+        monkeypatch.setattr(
+            "time.sleep",
+            lambda s: sleeps.append(s),
+        )
+
         with pytest.raises(ValueError):
             always_fail()
 
-        # 计算相邻等待时间
-        waits = [timestamps[i + 1] - timestamps[i] for i in range(len(timestamps) - 1)]
-        # 第二次等待应比第一次长（指数退避）
-        # 注：带 jitter 所以不一定严格 > ，但应该不会显著更短
-        assert waits[1] > waits[0] * 0.8  # 允许 20% 抖动
+        # 退避序列：理论上 0.05, 0.10, 0.20（带 jitter）
+        assert len(sleeps) == 3  # 4 次尝试之间有 3 次等待
+        # jitter 可能让相邻几次看起来"乱"（jitter 范围 0~max_wait），
+        # 但整体趋势一定递增 —— 最后一个比第一个明显长
+        assert sleeps[-1] > sleeps[0], (
+            f"期望指数增长，实际 sleeps={sleeps}（{sleeps[-1]} <= {sleeps[0]}）"
+        )
 
 
 class TestLLMRetry:

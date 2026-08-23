@@ -31,21 +31,20 @@ service = get_course_service()
 # ============================================================
 course_id = course_selector()
 
-with st.sidebar.expander("➕ 新建课程"):
+with st.sidebar.expander("➕ 新建课程"), st.form("new_course", clear_on_submit=True):
     # 用 form 把多个输入框打包：
     # 不用 form 的话，每敲一个字符都会触发整个脚本 rerun（很卡）
-    with st.form("new_course", clear_on_submit=True):
-        new_name = st.text_input("课程名称")
-        new_desc = st.text_area("课程描述", height=80)
+    new_name = st.text_input("课程名称")
+    new_desc = st.text_area("课程描述", height=80)
 
-        if st.form_submit_button("创建", use_container_width=True):
-            try:
-                course = service.create_course(conn, new_name, new_desc)
-                st.success(f"已创建：{course.name}")
-                # rerun 让新课程立刻出现在选择器里
-                st.rerun()
-            except ServiceError as exc:
-                st.error(str(exc))
+    if st.form_submit_button("创建", use_container_width=True):
+        try:
+            course = service.create_course(conn, new_name, new_desc)
+            st.success(f"已创建：{course.name}")
+            # rerun 让新课程立刻出现在选择器里
+            st.rerun()
+        except ServiceError as exc:
+            st.error(str(exc))
 
 if course_id is None:
     st.info("请先在左侧创建一门课程")
@@ -100,9 +99,7 @@ if files and st.button("⬆️ 开始上传", type="primary"):
         progress.progress(i / len(files), text=f"上传 {uploaded.name}")
         try:
             # getvalue() 拿到完整字节流（read() 只能读一次，容易踩坑）
-            service.upload_bytes(
-                conn, course_id, uploaded.name, uploaded.getvalue(), category
-            )
+            service.upload_bytes(conn, course_id, uploaded.name, uploaded.getvalue(), category)
             ok += 1
         except DuplicateDocumentError:
             skipped += 1
@@ -148,9 +145,7 @@ for tab, cat in ((tab_main, "main"), (tab_aux, "auxiliary")):
                     st.markdown(f"**{doc.path.name}**")
                     size_kb = doc.size / 1024
                     st.caption(
-                        f"{size_kb:.1f} KB · "
-                        f"{doc.mtime:%Y-%m-%d %H:%M} · "
-                        f"`{doc.sha256[:8]}`"
+                        f"{size_kb:.1f} KB · {doc.mtime:%Y-%m-%d %H:%M} · `{doc.sha256[:8]}`"
                     )
 
                 with status:

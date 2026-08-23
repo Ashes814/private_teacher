@@ -45,9 +45,7 @@ def render_home() -> None:
     col1, col2, col3 = st.columns(3)
     col1.metric("课程数", len(courses))
 
-    total_docs = sum(
-        get_course_service().get_stats(conn, c.id).total_documents for c in courses
-    )
+    total_docs = sum(get_course_service().get_stats(conn, c.id).total_documents for c in courses)
     col2.metric("课件总数", total_docs)
     col3.metric("LLM Provider", settings.llm.provider)
 
@@ -81,12 +79,8 @@ def render_home() -> None:
 # st.Page 显式声明页面：路径 + 标题 + 图标 + url 路径
 # 好处：页面文件可以放在任意目录，不受 "pages/ 必须与入口同级" 的约束
 home = st.Page(render_home, title="首页", icon="🏠", default=True)
-courseware = st.Page(
-    str(PAGES_DIR / "1_courseware.py"), title="课件管理", icon="📚"
-)
-knowledge_base = st.Page(
-    str(PAGES_DIR / "2_knowledge_base.py"), title="知识库", icon="🧠"
-)
+courseware = st.Page(str(PAGES_DIR / "1_courseware.py"), title="课件管理", icon="📚")
+knowledge_base = st.Page(str(PAGES_DIR / "2_knowledge_base.py"), title="知识库", icon="🧠")
 
 # navigation 返回被选中的页面对象，run() 执行它
 pg = st.navigation([home, courseware, knowledge_base])

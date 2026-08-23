@@ -126,7 +126,11 @@ with st.expander("⚙️ 高级选项"):
         }[c],
     )
     min_score = opt3.slider(
-        "最低相似度", 0.0, 1.0, 0.0, 0.05,
+        "最低相似度",
+        0.0,
+        1.0,
+        0.0,
+        0.05,
         help="过滤掉不太相关的结果。0 表示不过滤",
     )
 
@@ -175,7 +179,7 @@ if query:
 
                 # ---------- 源文件上下文（仅文本类） ----------
                 if loc.exists and loc.has_lines:
-                    resolver = kb._resolver(course_id)  # noqa: SLF001
+                    resolver = kb._resolver(course_id)
                     snippet = resolver.read_numbered_snippet(loc, context_lines=3)
                     with st.popover("查看源文件上下文"):
                         st.code(snippet, language=loc.file_type or "text")

@@ -15,6 +15,7 @@
   这时不能抛异常让整个页面崩掉 —— 要优雅降级成"文件已移除"提示，
   并且仍然把 chunk 的内容展示出来（内容存在向量库里，不依赖源文件）。
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -90,6 +91,7 @@ class SourceLocation:
             return f"{base}#page={self.page}"
         return base
 
+
 class SourceResolver:
     """把 chunk 映射回源文件位置。"""
 
@@ -127,9 +129,7 @@ class SourceResolver:
 
         content = chunk.page_content
         snippet = (
-            content
-            if len(content) <= snippet_chars
-            else content[:snippet_chars].rstrip() + "..."
+            content if len(content) <= snippet_chars else content[:snippet_chars].rstrip() + "..."
         )
 
         return SourceLocation(
@@ -241,9 +241,8 @@ class SourceResolver:
         out: list[str] = []
         for idx in range(start, end):
             line_no = idx + 1
-            hit = (
-                location.line_start is not None
-                and location.line_start <= line_no <= (location.line_end or location.line_start)
+            hit = location.line_start is not None and location.line_start <= line_no <= (
+                location.line_end or location.line_start
             )
             marker = "▶" if hit else " "
             # >4 是右对齐到 4 位宽，让行号列整齐

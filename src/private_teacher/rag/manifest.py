@@ -17,6 +17,7 @@ manifest 存了每个文件**建索引时的 sha256**，于是可以精确判断
 manifest 和 Chroma 目录是"一对孪生兄弟"，放在同一个目录下，
 删课程时 rmtree 一把全清掉，不会出现"数据库清了但向量还在"的不一致。
 """
+
 from __future__ import annotations
 
 import json
@@ -28,6 +29,7 @@ from loguru import logger
 # manifest 的格式版本。以后字段变了就 +1，读到旧版本直接当空的处理（触发全量重建）
 MANIFEST_VERSION = 1
 
+
 @dataclass(slots=True)
 class ManifestEntry:
     """一个已索引文件的记录。"""
@@ -37,6 +39,7 @@ class ManifestEntry:
     chunk_count: int  # 产生了多少个 chunk
     indexed_at: str  # ISO8601 时间
     document_id: str = ""  # 对应 documents 表的 id
+
 
 @dataclass(slots=True)
 class IndexManifest:
@@ -79,10 +82,7 @@ class IndexManifest:
             logger.warning("manifest 版本不匹配，将触发全量重建")
             return cls(course_id=course_id)
 
-        entries = {
-            key: ManifestEntry(**value)
-            for key, value in (raw.get("entries") or {}).items()
-        }
+        entries = {key: ManifestEntry(**value) for key, value in (raw.get("entries") or {}).items()}
         return cls(course_id=course_id, version=raw["version"], entries=entries)
 
     def save(self, data_dir: Path) -> None:

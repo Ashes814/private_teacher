@@ -1,4 +1,5 @@
 """retriever 单元测试（离线）。"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,6 +13,7 @@ from private_teacher.rag.splitters import split_documents
 from private_teacher.rag.vector_store import VectorStoreManager
 
 COURSE_ID = "c1"
+
 
 @pytest.fixture
 def paths(tmp_path: Path) -> PathSettings:
@@ -88,6 +90,7 @@ class TestRetrieve:
     def test_is_ready(self, retriever) -> None:
         assert retriever.is_ready() is True
 
+
 # ============================================================
 # 过滤
 # ============================================================
@@ -122,11 +125,10 @@ class TestFilters:
 
     def test_max_per_source(self, retriever) -> None:
         """同一个 PDF 有 2 页，限制每源 1 条时只能出 1 条。"""
-        results = retriever.retrieve_with_scores(
-            "学习", k=5, max_per_source=1
-        )
+        results = retriever.retrieve_with_scores("学习", k=5, max_per_source=1)
         sources = [r.source_path for r in results]
         assert len(sources) == len(set(sources))
+
 
 # ============================================================
 # RetrievalResult
@@ -161,6 +163,7 @@ class TestRetrievalResult:
         assert r.page == 3
         assert r.content == "内容"
 
+
 # ============================================================
 # 上下文拼装
 # ============================================================
@@ -183,6 +186,7 @@ class TestBuildContext:
         context, used = empty.build_context("查询")
         assert context == ""
         assert used == []
+
 
 # # ============================================================
 # # 混合检索

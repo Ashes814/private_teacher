@@ -23,6 +23,7 @@ from private_teacher.rag.retriever import RetrievalResult, Retriever
 from private_teacher.rag.source_resolver import SourceLocation, SourceResolver
 from private_teacher.rag.splitters import ChunkerConfig
 
+
 @dataclass(slots=True)
 class SearchHit:
     """检索结果 + 溯源信息，UI 直接渲染这个对象。
@@ -46,7 +47,8 @@ class SearchHit:
     @property
     def label(self) -> str:
         return self.location.label()
-    
+
+
 class KBService:
     """知识库服务。"""
 
@@ -68,16 +70,14 @@ class KBService:
     #   → 它们很轻（真正重的 embedder 已经共享了），
     #     而且 KBService 可能同时服务多门课，缓存反而要处理 course_id 切换
     def _indexer(self, course_id: str) -> Indexer:
-        return Indexer(
-            course_id, self.llm, self.paths, self.chunker_config, self._embedder
-        )
+        return Indexer(course_id, self.llm, self.paths, self.chunker_config, self._embedder)
 
     def _retriever(self, course_id: str) -> Retriever:
         return Retriever(course_id, self.llm, self.paths, self._embedder)
 
     def _resolver(self, course_id: str) -> SourceResolver:
         return SourceResolver(course_id, self.paths)
-    
+
     # ============================================================
     # 构建
     # ============================================================
@@ -99,14 +99,14 @@ class KBService:
         if incremental:
             return indexer.build_incremental(conn, on_file=on_file)
         return indexer.build_full(conn, on_file=on_file)
-    
+
     def stats(self, conn: sqlite3.Connection, course_id: str) -> dict[str, Any]:
         return self._indexer(course_id).stats(conn)
 
     def is_ready(self, course_id: str) -> bool:
         """知识库能不能用于检索。"""
         return self._retriever(course_id).is_ready()
-    
+
     # ============================================================
     # 检索
     # ============================================================
@@ -131,11 +131,8 @@ class KBService:
         results = self.search(course_id, query, k, **kwargs)
         resolver = self._resolver(course_id)
 
-        return [
-            SearchHit(result=r, location=resolver.resolve(r.document))
-            for r in results
-        ]
-    
+        return [SearchHit(result=r, location=resolver.resolve(r.document)) for r in results]
+
     def resolve_sources(
         self,
         course_id: str,
@@ -143,7 +140,7 @@ class KBService:
     ) -> list[SourceLocation]:
         """给一批 chunk 做溯源（兼容旧接口）。"""
         return self._resolver(course_id).resolve_many(chunks)
-    
+
     # ============================================================
     # 给 LLM 用
     # ============================================================
@@ -156,9 +153,7 @@ class KBService:
         **kwargs: Any,
     ) -> tuple[str, list[RetrievalResult]]:
         """检索并拼成带编号引用的上下文（Phase 2 Agent 会大量使用）。"""
-        return self._retriever(course_id).build_context(
-            query, k, max_chars, **kwargs
-        )
+        return self._retriever(course_id).build_context(query, k, max_chars, **kwargs)
 
     # ============================================================
     # 维护
